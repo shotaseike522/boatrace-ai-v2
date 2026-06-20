@@ -223,10 +223,7 @@ __marimo__/
 # 以下は、このプロジェクトで特に追加したい項目です。
 
 # 学習用の大きいCSV（手元PCにのみ置き、Gitには載せない）
-data/*.csv
-
-# 日々生成される予測結果（容量が増え続けるため）
-outputs/
+data/dataset_*.csv
 
 # Streamlitのローカル設定
 .streamlit/secrets.toml
