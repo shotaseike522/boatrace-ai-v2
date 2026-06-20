@@ -18,8 +18,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: リポジトリをチェックアウト
+      - name: リポジトリをチェックアウト（LFSファイルも取得）
         uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Python環境をセットアップ
         uses: actions/setup-python@v5

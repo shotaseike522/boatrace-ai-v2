@@ -1,0 +1,28 @@
+{
+  "created_by": "run_train_models.py",
+  "past_csv": "data/dataset_1_past_201307_202602.csv",
+  "recent_csv": "data/dataset_2_recent_202603_202605.csv",
+  "models": {
+    "C_lightgbm_direct120": "artifacts/models/lightgbm_direct120.joblib",
+    "C_lightgbm_position6": [
+      "artifacts/models/lightgbm_position1.joblib",
+      "artifacts/models/lightgbm_position2.joblib",
+      "artifacts/models/lightgbm_position3.joblib"
+    ],
+    "P_knn500": "artifacts/knn/",
+    "P_pairwise": "artifacts/models/pairwise_model.joblib"
+  },
+  "saved_paths": [
+    "artifacts\\models\\lightgbm_direct120.joblib",
+    "artifacts\\models\\lightgbm_position1.joblib",
+    "artifacts\\models\\lightgbm_position2.joblib",
+    "artifacts\\models\\lightgbm_position3.joblib",
+    "artifacts\\knn\\past_features.npy",
+    "artifacts\\knn\\past_labels.npy",
+    "artifacts\\knn\\feature_stats.json",
+    "artifacts\\knn\\past_race_info.csv",
+    "artifacts\\models\\pairwise_model.joblib",
+    "artifacts\\roughness_thresholds.json"
+  ],
+  "elapsed_seconds": 790.9
+}
