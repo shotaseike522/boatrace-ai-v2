@@ -69,7 +69,7 @@ def inject_style() -> None:
             --line: #E2E9F0;
         }
         .stApp { background: var(--bg); }
-        .block-container { max-width: 480px; padding-top: 1rem; padding-bottom: 2rem; }
+        .block-container { max-width: 480px; padding-top: 2.5rem; padding-bottom: 2rem; }
 
         .brand-bar {
             background: linear-gradient(180deg, var(--primary-deep) 0%, var(--primary) 100%);

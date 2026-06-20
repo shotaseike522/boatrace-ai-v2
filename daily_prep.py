@@ -156,6 +156,12 @@ def run_site_predictions(races_csv):
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
     output_csv = os.path.join(OUTPUTS_DIR, f"site_predictions_{hd_str}.csv")
 
+    # 💡 二重実行防止: GAS(0:00〜1:00頃)が既に成功していれば、
+    # GitHub Actions(6:15の保険実行)はこの予測処理をスキップする。
+    if os.path.exists(output_csv):
+        print(f"✅ 本日 ({hd_str}) の予測は既に作成済みのため、AI予測処理をスキップします: {output_csv}")
+        return output_csv
+
     print(f"\n--- [2] AI予測の実行 ({hd_str}) を開始 ---")
     cmd = [
         sys.executable,
