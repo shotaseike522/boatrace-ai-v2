@@ -1,0 +1,16 @@
+# --- このプロジェクト固有の追加分 ---
+# GitHubでリポジトリ作成時に「.gitignore: Python」を選んでいれば、
+# __pycache__/ や *.pyc などは既に除外されています。
+# 以下は、このプロジェクトで特に追加したい項目です。
+
+# 学習用の大きいCSV（手元PCにのみ置き、Gitには載せない）
+data/*.csv
+
+# 学習済みモデル（サイズが大きいため。必要なら個別にforce-addする）
+artifacts/
+
+# 日々生成される予測結果（容量が増え続けるため）
+outputs/
+
+# Streamlitのローカル設定
+.streamlit/secrets.toml
