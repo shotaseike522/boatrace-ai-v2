@@ -69,15 +69,18 @@ def inject_style() -> None:
             --line: #E2E9F0;
         }
         .stApp { background: var(--bg); }
-        .block-container { max-width: 480px; padding-top: 2.5rem; padding-bottom: 2rem; }
+        header[data-testid="stHeader"] {
+            background: transparent;
+        }
+        .block-container { max-width: 480px; padding-top: 3.5rem; padding-bottom: 2rem; }
 
         .brand-bar {
             background: linear-gradient(180deg, var(--primary-deep) 0%, var(--primary) 100%);
             color: white;
-            padding: 14px 18px;
+            padding: 16px 18px;
             border-radius: 14px;
             font-weight: 700;
-            font-size: 14px;
+            font-size: 15px;
             letter-spacing: 0.04em;
             margin-bottom: 14px;
         }
