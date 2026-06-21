@@ -69,21 +69,36 @@ def inject_style() -> None:
             --line: #E2E9F0;
         }
         .stApp { background: var(--bg); }
+
+        /* Streamlit標準ヘッダーは高さを潰して透明化し、自前の固定ヘッダーに差し替える */
         header[data-testid="stHeader"] {
             background: transparent;
+            height: 0;
+            min-height: 0;
         }
-        .block-container { max-width: 480px; padding-top: 3.5rem; padding-bottom: 2rem; }
+        header[data-testid="stHeader"] * {
+            visibility: hidden;
+        }
 
-        .brand-bar {
+        /* 自前の固定ヘッダー（スクロールしても画面上部に貼り付く） */
+        .fixed-brand-bar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 999;
             background: linear-gradient(180deg, var(--primary-deep) 0%, var(--primary) 100%);
             color: white;
-            padding: 16px 18px;
-            border-radius: 14px;
+            padding: 14px 20px;
             font-weight: 700;
             font-size: 15px;
             letter-spacing: 0.04em;
-            margin-bottom: 14px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.12);
         }
+
+        /* 固定ヘッダー分の余白を本文側に確保 */
+        .block-container { max-width: 480px; padding-top: 3.2rem; padding-bottom: 2rem; }
+
         .ai-card {
             background: var(--surface);
             border: 1px solid var(--line);
@@ -118,12 +133,38 @@ def inject_style() -> None:
             font-weight: 700;
             color: var(--primary-deep);
         }
+
+        /* 競艇場グリッド: 3列固定。st.columnsを使わず、コンテナにgridを当てて
+           中の st.button 群を強制的に横並びグリッドにする。
+           Streamlitはモバイル幅でst.columnsを縦積みに変えてしまうため、この方式を取る。 */
+        div[data-testid="stVerticalBlock"]:has(> div.venue-grid-marker) div[data-testid="stVerticalBlock"] {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        div[data-testid="stVerticalBlock"]:has(> div.venue-grid-marker) div[data-testid="stVerticalBlockBorderWrapper"] {
+            width: 100%;
+        }
+
+        /* レースグリッド: 6列固定（1〜6, 7〜12の2段になる） */
+        div[data-testid="stVerticalBlock"]:has(> div.race-grid-marker) div[data-testid="stVerticalBlock"] {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 6px;
+        }
+        div[data-testid="stVerticalBlock"]:has(> div.race-grid-marker) div[data-testid="stVerticalBlockBorderWrapper"] {
+            width: 100%;
+        }
+
         div[data-testid="stButton"] button {
             border-radius: 9px;
             border: 1.5px solid var(--line);
             background: var(--bg);
             color: var(--ink);
             font-weight: 700;
+            width: 100%;
+            white-space: pre-line;
+            line-height: 1.3;
         }
         div[data-testid="stButton"] button:hover {
             border-color: var(--primary);
@@ -171,20 +212,18 @@ def render_venue_picker(df: pd.DataFrame) -> None:
     st.markdown('<div class="ai-card-title">競艇場を選ぶ（本日開催中）</div>', unsafe_allow_html=True)
     available_jcds = sorted(df["jcd"].astype(str).unique().tolist())
 
-    cols = st.columns(4)
-    for i, jcd in enumerate(available_jcds):
+    st.markdown('<div class="venue-grid-marker"></div>', unsafe_allow_html=True)
+    for jcd in available_jcds:
         venue_name = VENUES_MAP.get(jcd, jcd)
-        col = cols[i % 4]
         is_active = st.session_state["target_jcd"] == jcd
-        with col:
-            if is_active:
-                st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
-            if st.button(f"{jcd}\n{venue_name}", key=f"venue_{jcd}", use_container_width=True):
-                st.session_state["target_jcd"] = jcd
-                st.session_state["target_rno"] = None
-                st.rerun()
-            if is_active:
-                st.markdown("</div>", unsafe_allow_html=True)
+        if is_active:
+            st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
+        if st.button(f"{jcd}\n{venue_name}", key=f"venue_{jcd}", use_container_width=True):
+            st.session_state["target_jcd"] = jcd
+            st.session_state["target_rno"] = None
+            st.rerun()
+        if is_active:
+            st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_race_picker(df: pd.DataFrame) -> None:
@@ -195,26 +234,22 @@ def render_race_picker(df: pd.DataFrame) -> None:
         df.loc[df["jcd"].astype(str) == st.session_state["target_jcd"], "r"].astype(int).unique().tolist()
     )
 
-    for row_start in (1, 7):
-        cols = st.columns(6)
-        for offset in range(6):
-            rno = row_start + offset
-            col = cols[offset]
-            with col:
-                if rno not in venue_races:
-                    st.markdown(
-                        f'<div style="text-align:center;color:var(--line);padding:8px 0;">{rno}</div>',
-                        unsafe_allow_html=True,
-                    )
-                    continue
-                is_active = st.session_state["target_rno"] == rno
-                if is_active:
-                    st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
-                if st.button(str(rno), key=f"race_{rno}", use_container_width=True):
-                    st.session_state["target_rno"] = rno
-                    st.rerun()
-                if is_active:
-                    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="race-grid-marker"></div>', unsafe_allow_html=True)
+    for rno in range(1, 13):
+        if rno not in venue_races:
+            st.markdown(
+                f'<div style="text-align:center;color:var(--line);padding:8px 0;">{rno}</div>',
+                unsafe_allow_html=True,
+            )
+            continue
+        is_active = st.session_state["target_rno"] == rno
+        if is_active:
+            st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
+        if st.button(str(rno), key=f"race_{rno}", use_container_width=True):
+            st.session_state["target_rno"] = rno
+            st.rerun()
+        if is_active:
+            st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_current_selection() -> None:
@@ -372,7 +407,7 @@ def main() -> None:
     st.set_page_config(page_title="競艇AI予想", layout="centered")
     inject_style()
 
-    st.markdown('<div class="brand-bar">競艇AI予想</div>', unsafe_allow_html=True)
+    st.markdown('<div class="fixed-brand-bar">競艇AI予想</div>', unsafe_allow_html=True)
 
     if "target_jcd" not in st.session_state:
         st.session_state["target_jcd"] = None
