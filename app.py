@@ -105,6 +105,12 @@ def inject_style() -> None:
             border-radius: 16px;
             padding: 16px;
             margin-bottom: 14px;
+            color: var(--ink);
+        }
+        /* 保険: ai-card内のテキストは、個別にcolor指定が無くても
+           OS/ブラウザのダークモード設定の影響を受けず常に読める色にする */
+        .ai-card div {
+            color: inherit;
         }
         .ai-card-title {
             font-size: 13px;
@@ -301,7 +307,7 @@ def render_ai_predictions(row: pd.Series, top_n: int = 5) -> None:
             f'<div style="display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);">'
             f'<div style="width:30px;height:30px;border-radius:8px;background:{bg};color:{fg};'
             f'display:flex;align-items:center;justify-content:center;font-weight:700;margin-right:12px;">{mark}</div>'
-            f'<div style="flex:1;font-size:19px;font-weight:700;">{ticket}</div>'
+            f'<div style="flex:1;font-size:19px;font-weight:700;color:var(--ink);">{ticket}</div>'
             f'<div style="font-size:15px;color:var(--primary);font-weight:700;">{prob_pct:.1f}%</div>'
             f"</div>"
         )
@@ -351,11 +357,11 @@ def render_payout_distribution(row: pd.Series) -> None:
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;">'
         '<div style="background:var(--bg);border-radius:10px;padding:10px 12px;">'
         '<div style="font-size:11px;color:var(--ink-soft);">平均払戻</div>'
-        f'<div style="font-size:19px;font-weight:700;">{avg_payout:,.0f}円</div>'
+        f'<div style="font-size:19px;font-weight:700;color:var(--ink);">{avg_payout:,.0f}円</div>'
         "</div>"
         '<div style="background:var(--bg);border-radius:10px;padding:10px 12px;">'
         '<div style="font-size:11px;color:var(--ink-soft);">中央値</div>'
-        f'<div style="font-size:19px;font-weight:700;">{median_payout:,.0f}円</div>'
+        f'<div style="font-size:19px;font-weight:700;color:var(--ink);">{median_payout:,.0f}円</div>'
         "</div>"
         "</div>"
         '<div style="display:flex;align-items:flex-end;gap:8px;height:90px;">'
@@ -384,7 +390,7 @@ def render_rank_frequency(row: pd.Series, top_n: int = 5) -> None:
         items.append(
             '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">'
             f'<div style="font-size:12px;color:var(--ink-soft);width:16px;">{rank}</div>'
-            f'<div style="font-weight:700;font-size:14px;width:56px;">{ticket}</div>'
+            f'<div style="font-weight:700;font-size:14px;width:56px;color:var(--ink);">{ticket}</div>'
             '<div style="flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;">'
             f'<div style="height:100%;background:var(--primary);border-radius:4px;width:{bar_width:.0f}%;"></div>'
             "</div>"
