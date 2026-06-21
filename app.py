@@ -134,26 +134,20 @@ def inject_style() -> None:
             color: var(--primary-deep);
         }
 
-        /* 競艇場グリッド: 3列固定。st.columnsを使わず、コンテナにgridを当てて
-           中の st.button 群を強制的に横並びグリッドにする。
-           Streamlitはモバイル幅でst.columnsを縦積みに変えてしまうため、この方式を取る。 */
-        div[data-testid="stVerticalBlock"]:has(> div.venue-grid-marker) div[data-testid="stVerticalBlock"] {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
+        /* st.columns は画面が狭いと自動的に縦積みに変わってしまうため、
+           横並び(flex-direction: row)を画面幅に関わらず強制する。
+           Streamlitの標準DOM: st.columns() は [data-testid="stHorizontalBlock"] を生成し、
+           その直下に各列が [data-testid="stColumn"] として並ぶ。 */
+        div[data-testid="stHorizontalBlock"] {
+            display: flex !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
             gap: 8px;
         }
-        div[data-testid="stVerticalBlock"]:has(> div.venue-grid-marker) div[data-testid="stVerticalBlockBorderWrapper"] {
-            width: 100%;
-        }
-
-        /* レースグリッド: 6列固定（1〜6, 7〜12の2段になる） */
-        div[data-testid="stVerticalBlock"]:has(> div.race-grid-marker) div[data-testid="stVerticalBlock"] {
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
-            gap: 6px;
-        }
-        div[data-testid="stVerticalBlock"]:has(> div.race-grid-marker) div[data-testid="stVerticalBlockBorderWrapper"] {
-            width: 100%;
+        div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+            flex: 1 1 0 !important;
+            width: auto !important;
+            min-width: 0 !important;
         }
 
         div[data-testid="stButton"] button {
@@ -212,18 +206,22 @@ def render_venue_picker(df: pd.DataFrame) -> None:
     st.markdown('<div class="ai-card-title">競艇場を選ぶ（本日開催中）</div>', unsafe_allow_html=True)
     available_jcds = sorted(df["jcd"].astype(str).unique().tolist())
 
-    st.markdown('<div class="venue-grid-marker"></div>', unsafe_allow_html=True)
-    for jcd in available_jcds:
-        venue_name = VENUES_MAP.get(jcd, jcd)
-        is_active = st.session_state["target_jcd"] == jcd
-        if is_active:
-            st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
-        if st.button(f"{jcd}\n{venue_name}", key=f"venue_{jcd}", use_container_width=True):
-            st.session_state["target_jcd"] = jcd
-            st.session_state["target_rno"] = None
-            st.rerun()
-        if is_active:
-            st.markdown("</div>", unsafe_allow_html=True)
+    n_cols = 3
+    rows = [available_jcds[i : i + n_cols] for i in range(0, len(available_jcds), n_cols)]
+    for row in rows:
+        cols = st.columns(n_cols)
+        for i, jcd in enumerate(row):
+            venue_name = VENUES_MAP.get(jcd, jcd)
+            is_active = st.session_state["target_jcd"] == jcd
+            with cols[i]:
+                if is_active:
+                    st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
+                if st.button(f"{jcd}\n{venue_name}", key=f"venue_{jcd}", use_container_width=True):
+                    st.session_state["target_jcd"] = jcd
+                    st.session_state["target_rno"] = None
+                    st.rerun()
+                if is_active:
+                    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_race_picker(df: pd.DataFrame) -> None:
@@ -234,22 +232,25 @@ def render_race_picker(df: pd.DataFrame) -> None:
         df.loc[df["jcd"].astype(str) == st.session_state["target_jcd"], "r"].astype(int).unique().tolist()
     )
 
-    st.markdown('<div class="race-grid-marker"></div>', unsafe_allow_html=True)
-    for rno in range(1, 13):
-        if rno not in venue_races:
-            st.markdown(
-                f'<div style="text-align:center;color:var(--line);padding:8px 0;">{rno}</div>',
-                unsafe_allow_html=True,
-            )
-            continue
-        is_active = st.session_state["target_rno"] == rno
-        if is_active:
-            st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
-        if st.button(str(rno), key=f"race_{rno}", use_container_width=True):
-            st.session_state["target_rno"] = rno
-            st.rerun()
-        if is_active:
-            st.markdown("</div>", unsafe_allow_html=True)
+    for row_start in (1, 7):
+        cols = st.columns(6)
+        for offset in range(6):
+            rno = row_start + offset
+            with cols[offset]:
+                if rno not in venue_races:
+                    st.markdown(
+                        f'<div style="text-align:center;color:var(--line);padding:8px 0;">{rno}</div>',
+                        unsafe_allow_html=True,
+                    )
+                    continue
+                is_active = st.session_state["target_rno"] == rno
+                if is_active:
+                    st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
+                if st.button(str(rno), key=f"race_{rno}", use_container_width=True):
+                    st.session_state["target_rno"] = rno
+                    st.rerun()
+                if is_active:
+                    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_current_selection() -> None:
