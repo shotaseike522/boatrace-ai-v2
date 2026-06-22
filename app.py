@@ -410,6 +410,50 @@ def render_rank_frequency(row: pd.Series, top_n: int = 5) -> None:
 # ====================================================
 # メイン
 # ====================================================
+def render_pickup_races(df: pd.DataFrame, n: int = 6) -> None:
+    """荒れにくい順にレースをピックアップして表示する。
+    タップすると下の競艇場・レースボタンが連動して選択され、予想内容が表示される。
+    """
+    if "roughness_score" not in df.columns:
+        return
+
+    pickup = (
+        df[["jcd", "r", "roughness_score"]]
+        .dropna(subset=["roughness_score"])
+        .sort_values("roughness_score")
+        .head(n)
+        .reset_index(drop=True)
+    )
+    if pickup.empty:
+        return
+
+    st.markdown('<div class="ai-card-title">本日のおすすめレース（荒れにくい順）</div>', unsafe_allow_html=True)
+
+    n_cols = 3
+    rows = [pickup.iloc[i : i + n_cols] for i in range(0, len(pickup), n_cols)]
+    for row_df in rows:
+        cols = st.columns(n_cols)
+        for i, (_, item) in enumerate(row_df.iterrows()):
+            jcd = str(item["jcd"]).zfill(2)
+            rno = int(item["r"])
+            score = int(item["roughness_score"])
+            venue_name = VENUES_MAP.get(jcd, jcd)
+            is_active = (
+                st.session_state["target_jcd"] == jcd
+                and st.session_state["target_rno"] == rno
+            )
+            with cols[i]:
+                if is_active:
+                    st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
+                label = f"{venue_name} {rno}R\n荒れ度 {score}"
+                if st.button(label, key=f"pickup_{jcd}_{rno}", use_container_width=True):
+                    st.session_state["target_jcd"] = jcd
+                    st.session_state["target_rno"] = rno
+                    st.rerun()
+                if is_active:
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+
 def main() -> None:
     st.set_page_config(page_title="競艇AI予想", layout="centered")
     inject_style()
@@ -435,6 +479,11 @@ def main() -> None:
         f'<div style="font-size:11px;color:var(--ink-soft);margin-bottom:10px;">データ日付: {date_label}</div>',
         unsafe_allow_html=True,
     )
+
+    with st.container():
+        st.markdown('<div class="ai-card">', unsafe_allow_html=True)
+        render_pickup_races(df, n=6)
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with st.container():
         st.markdown('<div class="ai-card">', unsafe_allow_html=True)
