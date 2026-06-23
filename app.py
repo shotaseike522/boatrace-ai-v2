@@ -325,6 +325,26 @@ def render_ai_predictions(row: pd.Series, top_n: int = 5) -> None:
     st.markdown(card_html, unsafe_allow_html=True)
 
 
+def render_value_pick(row: pd.Series) -> None:
+    """11R・12R専用の高期待値予想を表示する。該当レース以外は何も表示しない。"""
+    ticket = row.get("value_pick_ticket", "")
+    prob = row.get("value_pick_prob", None)
+    if not ticket or pd.isna(ticket) or ticket == "":
+        return
+    prob_pct = float(prob) * 100 if pd.notna(prob) else 0.0
+    card_html = (
+        '<div class="ai-card">'
+        '<div class="ai-card-title">高期待値予想（11・12R）</div>'
+        '<div style="display:flex;align-items:center;padding:10px 0;">'
+        f'<div style="font-family:\'Roboto Condensed\',sans-serif;font-size:22px;font-weight:700;color:var(--ink);flex:1;">{ticket}</div>'
+        f'<div style="font-size:16px;font-weight:700;color:var(--primary);">{prob_pct:.1f}%</div>'
+        '</div>'
+        '<div style="font-size:11px;color:var(--ink-soft);">回収率寄りの1点候補 / 通常AI予想とは別ロジック</div>'
+        '</div>'
+    )
+    st.markdown(card_html, unsafe_allow_html=True)
+
+
 def render_quinella(row: pd.Series, top_n: int = 3) -> None:
     """2連複ベスト3を表示する。"""
     items = []
@@ -547,6 +567,7 @@ def main() -> None:
             row = target.iloc[0]
             render_roughness(row)
             render_ai_predictions(row, top_n=5)
+            render_value_pick(row)
             render_quinella(row, top_n=3)
             render_payout_distribution(row)
             render_rank_frequency(row, top_n=5)
