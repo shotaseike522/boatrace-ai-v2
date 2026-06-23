@@ -56,7 +56,8 @@ MARK_STYLE = {
 # ====================================================
 def inject_style() -> None:
     # Google Analytics（GA4）計測タグ
-    st.components.v1.html(
+    # st.markdownで直接DOMに挿入することでiframe内に閉じ込められる問題を回避する
+    st.markdown(
         """
         <script async src="https://www.googletagmanager.com/gtag/js?id=G-3P0PV90GHQ"></script>
         <script>
@@ -66,7 +67,7 @@ def inject_style() -> None:
           gtag('config', 'G-3P0PV90GHQ');
         </script>
         """,
-        height=0,
+        unsafe_allow_html=True,
     )
     st.markdown(
         """
