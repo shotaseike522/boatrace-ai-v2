@@ -55,6 +55,19 @@ MARK_STYLE = {
 # スタイル（白ベース + 青アクセント、スマホ最優先）
 # ====================================================
 def inject_style() -> None:
+    # Google Analytics（GA4）計測タグ
+    st.components.v1.html(
+        """
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-3P0PV90GHQ"></script>
+        <script>
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', 'G-3P0PV90GHQ');
+        </script>
+        """,
+        height=0,
+    )
     st.markdown(
         """
         <style>
