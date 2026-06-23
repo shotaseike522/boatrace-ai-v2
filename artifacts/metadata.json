@@ -10,7 +10,8 @@
       "artifacts/models/lightgbm_position3.joblib"
     ],
     "P_knn500": "artifacts/knn/",
-    "P_pairwise": "artifacts/models/pairwise_model.joblib"
+    "P_pairwise": "artifacts/models/pairwise_model.joblib",
+    "BasePositionModel": "artifacts/models/base_position_model.joblib"
   },
   "saved_paths": [
     "artifacts\\models\\lightgbm_direct120.joblib",
@@ -22,7 +23,8 @@
     "artifacts\\knn\\feature_stats.json",
     "artifacts\\knn\\past_race_info.csv",
     "artifacts\\models\\pairwise_model.joblib",
-    "artifacts\\roughness_thresholds.json"
+    "artifacts\\roughness_thresholds.json",
+    "artifacts\\models\\base_position_model.joblib"
   ],
-  "elapsed_seconds": 790.9
+  "elapsed_seconds": 837.8
 }

@@ -325,6 +325,44 @@ def render_ai_predictions(row: pd.Series, top_n: int = 5) -> None:
     st.markdown(card_html, unsafe_allow_html=True)
 
 
+def render_quinella(row: pd.Series, top_n: int = 3) -> None:
+    """2連複ベスト3を表示する。"""
+    items = []
+    max_prob = 0.0
+    for rank in range(1, top_n + 1):
+        prob = row.get(f"quinella_top{rank}_prob", 0.0)
+        if pd.notna(prob):
+            max_prob = max(max_prob, float(prob))
+
+    for rank in range(1, top_n + 1):
+        pair = row.get(f"quinella_top{rank}_pair", "")
+        prob = row.get(f"quinella_top{rank}_prob", 0.0)
+        if not pair or pd.isna(pair):
+            continue
+        prob_pct = float(prob) * 100 if pd.notna(prob) else 0.0
+        bar_width = (float(prob) / max_prob * 100) if max_prob > 0 else 0
+        items.append(
+            f'<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);">'
+            f'<div style="font-family:\'Roboto Condensed\',sans-serif;font-size:20px;font-weight:700;color:var(--ink);width:48px;">{pair}</div>'
+            f'<div style="flex:1;height:8px;background:var(--bg);border-radius:4px;overflow:hidden;">'
+            f'<div style="height:100%;background:var(--accent);border-radius:4px;width:{bar_width:.0f}%;"></div>'
+            f'</div>'
+            f'<div style="font-size:15px;font-weight:700;color:var(--primary);width:48px;text-align:right;">{prob_pct:.1f}%</div>'
+            f'</div>'
+        )
+
+    if not items:
+        return
+
+    card_html = (
+        '<div class="ai-card">'
+        '<div class="ai-card-title">2連複 ベスト3</div>'
+        f"{''.join(items)}"
+        '</div>'
+    )
+    st.markdown(card_html, unsafe_allow_html=True)
+
+
 def render_payout_distribution(row: pd.Series) -> None:
     avg_payout = row.get("similar_avg_payout", 0)
     median_payout = row.get("similar_median_payout", 0)
@@ -509,6 +547,7 @@ def main() -> None:
             row = target.iloc[0]
             render_roughness(row)
             render_ai_predictions(row, top_n=5)
+            render_quinella(row, top_n=3)
             render_payout_distribution(row)
             render_rank_frequency(row, top_n=5)
     else:

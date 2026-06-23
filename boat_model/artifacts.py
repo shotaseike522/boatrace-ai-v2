@@ -475,3 +475,55 @@ def build_ai_top10_table(
         columns[f"{prefix}_top10_agreement_count"] = top10_agree
 
     return pd.DataFrame(columns)
+
+
+def compute_quinella_top3(ai_proba: np.ndarray, top_n: int = 3) -> pd.DataFrame:
+    """3連単120通りの確率から2連複（1・2着を順不同）の上位3点を計算する。
+
+    2連複「A-B」の確率 = 3連単のうち1着A・2着B または 1着B・2着A となる全通りの合計。
+    例: 2連複「1-2」= 1-2-3 + 1-2-4 + 1-2-5 + 1-2-6 + 2-1-3 + 2-1-4 + 2-1-5 + 2-1-6 の合計。
+
+    Returns
+    -------
+    pd.DataFrame
+        quinella_top1_pair / quinella_top1_prob
+        quinella_top2_pair / quinella_top2_prob
+        quinella_top3_pair / quinella_top3_prob
+    """
+    from itertools import combinations
+
+    # 2連複の全ペア（15通り）を定義し、対応する3連単インデックスを事前計算
+    quinella_pairs = list(combinations(BOATS, 2))  # (1,2), (1,3), ..., (5,6)
+    pair_to_trifecta_indices: dict[tuple[int, int], list[int]] = {pair: [] for pair in quinella_pairs}
+    for idx, (first, second, third) in enumerate(TRIFECTA_PERMUTATIONS):
+        key = tuple(sorted([first, second]))
+        if key in pair_to_trifecta_indices:
+            pair_to_trifecta_indices[key].append(idx)
+
+    n_races = ai_proba.shape[0]
+    columns: dict[str, list] = {}
+
+    for rank in range(1, top_n + 1):
+        columns[f"quinella_top{rank}_pair"] = []
+        columns[f"quinella_top{rank}_prob"] = []
+
+    for race_idx in range(n_races):
+        race_proba = ai_proba[race_idx]
+        # 各2連複ペアの確率を合算
+        quinella_probs = {
+            pair: float(race_proba[indices].sum())
+            for pair, indices in pair_to_trifecta_indices.items()
+        }
+        sorted_pairs = sorted(quinella_probs.items(), key=lambda x: x[1], reverse=True)
+
+        for rank in range(1, top_n + 1):
+            if rank - 1 < len(sorted_pairs):
+                pair, prob = sorted_pairs[rank - 1]
+                columns[f"quinella_top{rank}_pair"].append(f"{pair[0]}-{pair[1]}")
+                columns[f"quinella_top{rank}_prob"].append(round(prob, 6))
+            else:
+                columns[f"quinella_top{rank}_pair"].append("")
+                columns[f"quinella_top{rank}_prob"].append(float("nan"))
+
+    return pd.DataFrame(columns)
+

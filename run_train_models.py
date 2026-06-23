@@ -21,6 +21,7 @@ from boat_model.artifacts import (  # noqa: E402
 from boat_model.data_loader import load_race_data  # noqa: E402
 from boat_model.features import add_basic_features  # noqa: E402
 from boat_model.models import ApproxRaceKNNModel, ModelCBasicDirect, ModelCBasicPosition, PairwiseRankModel  # noqa: E402
+from boat_model.value_pick import BasePositionModel, save_base_position_model  # noqa: E402
 
 
 # 学習用CSVは data/ フォルダに置く想定。
@@ -77,6 +78,10 @@ def run() -> None:
 
     saved_paths.append(str(save_roughness_artifact(past, artifacts_root)))
 
+    print("Training BasePositionModel (for value_pick / 11・12R)...")
+    base_position = BasePositionModel().fit(past)
+    saved_paths.append(str(save_base_position_model(base_position, models_dir)))
+
     metadata = {
         "created_by": "run_train_models.py",
         "past_csv": args.past_csv,
@@ -90,6 +95,7 @@ def run() -> None:
             ],
             "P_knn500": "artifacts/knn/",
             "P_pairwise": "artifacts/models/pairwise_model.joblib",
+            "BasePositionModel": "artifacts/models/base_position_model.joblib",
         },
         "saved_paths": saved_paths,
         "elapsed_seconds": round(time.time() - start, 1),

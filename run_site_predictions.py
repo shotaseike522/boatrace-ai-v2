@@ -18,6 +18,7 @@ import pandas as pd  # noqa: E402
 from boat_model.artifacts import (  # noqa: E402
     assign_roughness_bins,
     build_ai_top10_table,
+    compute_quinella_top3,
     compute_roughness_score,
     knn_predict_proba_and_neighbors,
     load_joblib_artifact,
@@ -26,6 +27,12 @@ from boat_model.artifacts import (  # noqa: E402
     similar_race_diagnostics,
 )
 from boat_model.features import REGISTRATION_COLS, WINRATE_COLS, add_basic_features, normalize_probability_matrix  # noqa: E402
+from boat_model.data_loader import load_racer_master  # noqa: E402
+from boat_model.value_pick import (  # noqa: E402
+    compute_value_pick,
+    load_base_position_model,
+    GAMMA_FIXED,
+)
 
 # 仕様書(model_inventory.md)記載の重み。
 #   AI_score = 0.50*direct120 + 0.35*position6 + 0.15*blend
@@ -200,9 +207,41 @@ def main() -> None:
     )
     output = pd.concat([output, ai_top10], axis=1)
 
+    # --- 2連複 ベスト3 ---
+    quinella = compute_quinella_top3(ai_proba, top_n=3)
+    output = pd.concat([output, quinella], axis=1)
+
     # --- 近似100レース (過去事実: 配当分布 + 着順発生率Top10) ---
     diagnostics = similar_race_diagnostics(knn_artifact, neighbors100)
     output = pd.concat([output, diagnostics], axis=1)
+
+    # --- 11・12R 妙味候補 (value_pick) ---
+    # BasePositionModelがartifactsにあれば計算、なければ全行空欄で通常予想には影響しない。
+    base_position_model = load_base_position_model(models_dir)
+    master_path = Path("racer_master.csv")
+    if base_position_model is not None and master_path.exists():
+        try:
+            master = load_racer_master(str(master_path))
+            value_pick = compute_value_pick(
+                races, base_position_model, master, gamma=GAMMA_FIXED
+            )
+            output = pd.concat([output, value_pick], axis=1)
+            n_picks = (output["value_pick_ticket"] != "").sum()
+            print(f"  value_pick: {n_picks} races (11R・12Rのみ)")
+        except Exception as e:
+            print(f"[WARN] value_pick の計算中にエラーが発生しました（通常予想には影響しません）: {e}")
+            for col in ["value_pick_ticket", "value_pick_prob", "value_pick_model",
+                        "value_pick_reason", "value_pick_gamma", "value_pick_target"]:
+                output[col] = ""
+    else:
+        if base_position_model is None:
+            print("[INFO] base_position_model.joblib が見つかりません。value_pick をスキップします。")
+            print("       run_train_models.py を実行して再学習してください。")
+        if not master_path.exists():
+            print("[INFO] racer_master.csv が見つかりません。value_pick をスキップします。")
+        for col in ["value_pick_ticket", "value_pick_prob", "value_pick_model",
+                    "value_pick_reason", "value_pick_gamma", "value_pick_target"]:
+            output[col] = ""
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
