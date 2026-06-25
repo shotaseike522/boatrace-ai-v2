@@ -228,3 +228,4 @@ data/dataset_*.csv
 # Streamlitのローカル設定
 .streamlit/secrets.toml
 
+artifacts/
