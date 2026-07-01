@@ -380,21 +380,42 @@ def render_value_pick(row: pd.Series) -> None:
     st.markdown(card_html, unsafe_allow_html=True)
 
 
+def _quinella_from_trifecta(row: pd.Series, top_n_trifecta: int = 20) -> list[tuple[str, float]]:
+    """Top20の3連単確率から2連複（1・2着の組み合わせ）を集計して確率降順で返す。"""
+    from collections import defaultdict
+    pair_prob: dict[str, float] = defaultdict(float)
+    for rank in range(1, top_n_trifecta + 1):
+        ticket = row.get(f"ai_top{rank}_ticket", "")
+        prob = row.get(f"ai_top{rank}_prob", 0.0)
+        if not ticket or pd.isna(ticket) or pd.isna(prob):
+            continue
+        boats = str(ticket).split("-")
+        if len(boats) < 2:
+            continue
+        pair = "-".join(sorted([boats[0], boats[1]]))
+        pair_prob[pair] += float(prob)
+    return sorted(pair_prob.items(), key=lambda x: x[1], reverse=True)
+
+
 def render_quinella(row: pd.Series, top_n: int = 3) -> None:
     """2連複ベスト3を表示する。"""
-    items = []
-    max_prob = 0.0
-    for rank in range(1, top_n + 1):
-        prob = row.get(f"quinella_top{rank}_prob", 0.0)
-        if pd.notna(prob):
-            max_prob = max(max_prob, float(prob))
+    # 旧CSV: quinella_top* 列を使用、新CSV: 3連単Top20から計算
+    has_quinella_cols = any(f"quinella_top1_pair" == k for k in row.index)
+    if has_quinella_cols and pd.notna(row.get("quinella_top1_pair", None)):
+        pairs = [
+            (row.get(f"quinella_top{r}_pair", ""), row.get(f"quinella_top{r}_prob", 0.0))
+            for r in range(1, top_n + 1)
+        ]
+    else:
+        pairs = _quinella_from_trifecta(row)[:top_n]
 
-    for rank in range(1, top_n + 1):
-        pair = row.get(f"quinella_top{rank}_pair", "")
-        prob = row.get(f"quinella_top{rank}_prob", 0.0)
-        if not pair or pd.isna(pair):
+    items = []
+    max_prob = max((float(p) for _, p in pairs if pd.notna(p)), default=0.0)
+
+    for pair, prob in pairs:
+        if not pair or pd.isna(prob):
             continue
-        prob_pct = float(prob) * 100 if pd.notna(prob) else 0.0
+        prob_pct = float(prob) * 100
         bar_width = (float(prob) / max_prob * 100) if max_prob > 0 else 0
         items.append(
             f'<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);">'
