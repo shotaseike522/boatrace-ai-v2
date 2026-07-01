@@ -316,14 +316,16 @@ def render_roughness(row: pd.Series) -> None:
     roughness_bin = str(row.get("roughness_bin", ""))
     label = ROUGHNESS_BIN_TO_LABEL.get(roughness_bin) or row.get("roughness_label", "-")
     color = ROUGHNESS_LABEL_COLOR.get(str(label), "#5A6B7D")
-    # バー位置はbinで決定（生スコアは分布依存で見た目と一致しないため）
-    bar_pct = _ROUGHNESS_BIN_POSITION.get(roughness_bin) or _ROUGHNESS_LABEL_POSITION.get(str(label), 50)
+    raw_score = row.get("roughness_score", 0)
+    score = float(raw_score) * 100 if float(raw_score) <= 1.0 else float(raw_score)
+    bar_pct = min(max(score, 2), 97)  # バーが端で切れないよう2〜97%にクリップ
 
     html = (
         '<div class="ai-card">'
         '<div class="ai-card-title">荒れやすさ</div>'
         f'<div style="font-size:20px;font-weight:700;color:{color};">{label}</div>'
-        '<div style="position:relative;height:24px;border-radius:12px;margin-bottom:4px;'
+        f'<div style="font-size:13px;color:var(--ink-soft);margin-bottom:10px;">{score:.0f} / 100</div>'
+        '<div style="position:relative;height:24px;border-radius:12px;'
         'background:linear-gradient(90deg,#E1F3EC 0%,#FFF4DD 50%,#FBE5E2 100%);overflow:hidden;">'
         f'<div style="position:absolute;top:0;bottom:0;left:{bar_pct}%;width:3px;background:#1A2433;"></div>'
         "</div>"
