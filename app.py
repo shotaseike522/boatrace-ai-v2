@@ -35,26 +35,26 @@ VENUES_MAP = {
 OUTPUTS_DIR = "outputs"
 
 ROUGHNESS_LABEL_COLOR = {
-    "超堅め": "#1C8C5C",
     "堅め": "#1C8C5C",
-    "普通": "#5A6B7D",
-    "荒れ注意": "#C98A00",
-    "波乱含み": "#E2342B",
+    "やや堅め": "#1C8C5C",
+    "標準": "#5A6B7D",
+    "やや荒れ": "#C98A00",
+    "荒れ": "#E2342B",
 }
 
 # 新CSVの roughness_bin 値 → 日本語ラベル
 ROUGHNESS_BIN_TO_LABEL = {
-    "rough_Q1": "超堅め",
-    "rough_Q2": "堅め",
-    "rough_Q3": "普通",
-    "rough_Q4": "荒れ注意",
-    "rough_Q5": "波乱含み",
+    "rough_Q1": "堅め",
+    "rough_Q2": "やや堅め",
+    "rough_Q3": "標準",
+    "rough_Q4": "やや荒れ",
+    "rough_Q5": "荒れ",
     # 旧フォーマット互換
-    "Q1_low_roughness": "超堅め",
-    "Q2": "堅め",
-    "Q3": "普通",
-    "Q4": "荒れ注意",
-    "Q5_high_roughness": "波乱含み",
+    "Q1_low_roughness": "堅め",
+    "Q2": "やや堅め",
+    "Q3": "標準",
+    "Q4": "やや荒れ",
+    "Q5_high_roughness": "荒れ",
 }
 
 MARK_STYLE = {
@@ -309,7 +309,7 @@ _ROUGHNESS_BIN_POSITION = {
     "rough_Q4": 70, "Q4": 70,
     "rough_Q5": 90, "Q5_high_roughness": 90,
 }
-_ROUGHNESS_LABEL_POSITION = {"超堅め": 10, "堅め": 30, "普通": 50, "荒れ注意": 70, "波乱含み": 90}
+_ROUGHNESS_LABEL_POSITION = {"堅め": 10, "やや堅め": 30, "標準": 50, "やや荒れ": 70, "荒れ": 90}
 
 
 def render_roughness(row: pd.Series) -> None:
@@ -317,20 +317,19 @@ def render_roughness(row: pd.Series) -> None:
     label = ROUGHNESS_BIN_TO_LABEL.get(roughness_bin) or row.get("roughness_label", "-")
     color = ROUGHNESS_LABEL_COLOR.get(str(label), "#5A6B7D")
     raw_score = row.get("roughness_score", 0)
-    score = float(raw_score) * 100 if float(raw_score) <= 1.0 else float(raw_score)
+    score = round(float(raw_score) * 100 if float(raw_score) <= 1.0 else float(raw_score))
     bar_pct = min(max(score, 2), 97)  # バーが端で切れないよう2〜97%にクリップ
 
     html = (
         '<div class="ai-card">'
-        '<div class="ai-card-title">荒れやすさ</div>'
-        f'<div style="font-size:20px;font-weight:700;color:{color};">{label}</div>'
-        f'<div style="font-size:13px;color:var(--ink-soft);margin-bottom:10px;">{score:.0f} / 100</div>'
-        '<div style="position:relative;height:24px;border-radius:12px;'
+        '<div class="ai-card-title">荒れ度</div>'
+        f'<div style="font-size:20px;font-weight:700;color:{color};">{score} / 100（{label}）</div>'
+        '<div style="position:relative;height:24px;border-radius:12px;margin-top:8px;'
         'background:linear-gradient(90deg,#E1F3EC 0%,#FFF4DD 50%,#FBE5E2 100%);overflow:hidden;">'
         f'<div style="position:absolute;top:0;bottom:0;left:{bar_pct}%;width:3px;background:#1A2433;"></div>'
         "</div>"
         '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-soft);margin-top:4px;">'
-        "<span>超堅め</span><span>堅め</span><span>普通</span><span>荒れ注意</span><span>波乱含み</span>"
+        "<span>堅め</span><span>やや堅め</span><span>標準</span><span>やや荒れ</span><span>荒れ</span>"
         "</div>"
         "</div>"
     )
