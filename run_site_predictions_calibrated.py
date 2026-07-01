@@ -20,7 +20,7 @@ import pandas as pd
 
 from boat_model.artifacts import load_joblib_artifact
 from boat_model.data_loader import load_race_data
-from boat_model.features import INDEX_TO_TRIFECTA, WINRATE_COLS, add_basic_features, normalize_probability_matrix
+from boat_model.features import INDEX_TO_TRIFECTA, TRIFECTA_PERMUTATIONS, WINRATE_COLS, add_basic_features, normalize_probability_matrix
 from run_full_probability_calibration import (
     MODEL_OUTER,
     PATTERN_LABELS,
@@ -67,6 +67,31 @@ SPLIT_A_SIZE = 200_000
 SPLIT_B_SIZE = 200_000
 DISPLAY_LABEL = "AI予想確率"
 DISPLAY_NOTE = "過去データで実績補正した推定確率です。"
+
+# 2連複: ticket index → quinella pair key (e.g. "1-2")
+_QUINELLA_PAIR_OF: list[str] = [
+    "-".join(str(b) for b in sorted([perm[0], perm[1]]))
+    for perm in TRIFECTA_PERMUTATIONS
+]
+# 全15通りの2連複ペア一覧（確定順）
+_QUINELLA_PAIRS: list[str] = sorted(
+    {p for p in _QUINELLA_PAIR_OF},
+    key=lambda s: (int(s.split("-")[0]), int(s.split("-")[1])),
+)
+# pair → 対応する ticket index のリスト
+_QUINELLA_INDICES: dict[str, list[int]] = {p: [] for p in _QUINELLA_PAIRS}
+for _idx, _pair in enumerate(_QUINELLA_PAIR_OF):
+    _QUINELLA_INDICES[_pair].append(_idx)
+
+
+def quinella_probs_from_calibrated(calibrated: np.ndarray) -> np.ndarray:
+    """calibrated (n_races, 120) → 2連複確率 (n_races, 15), pair順は _QUINELLA_PAIRS と一致。"""
+    n_races = calibrated.shape[0]
+    q_probs = np.zeros((n_races, len(_QUINELLA_PAIRS)), dtype=np.float32)
+    for q_idx, pair in enumerate(_QUINELLA_PAIRS):
+        ticket_indices = _QUINELLA_INDICES[pair]
+        q_probs[:, q_idx] = calibrated[:, ticket_indices].sum(axis=1)
+    return q_probs
 
 
 def parse_args() -> argparse.Namespace:
@@ -316,6 +341,9 @@ def build_site_outputs(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     raw_ranks = rank_matrix(ranking_proba)
     calibrated_ranks = rank_matrix(calibrated)
+    # 全120パターンから2連複確率を計算
+    q_probs = quinella_probs_from_calibrated(calibrated)  # (n_races, 15)
+    q_order = np.argsort(-q_probs, axis=1)  # 確率降順のインデックス
     top20 = top20_by_calibrated_probability(
         calibrated=calibrated,
         calibrated_ranks=calibrated_ranks,
@@ -344,6 +372,9 @@ def build_site_outputs(
             "probability_label": DISPLAY_LABEL,
             "probability_note": DISPLAY_NOTE,
         }
+        for q_rank, q_idx in enumerate(q_order[race_i, :3], start=1):
+            row[f"quinella_top{q_rank}_pair"] = _QUINELLA_PAIRS[int(q_idx)]
+            row[f"quinella_top{q_rank}_prob"] = float(q_probs[race_i, int(q_idx)])
         seen: set[str] = set()
         for display_rank, ticket_idx in enumerate(ticket_indices, start=1):
             ticket_idx = int(ticket_idx)
