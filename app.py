@@ -302,23 +302,30 @@ def render_current_selection() -> None:
     st.markdown(html, unsafe_allow_html=True)
 
 
+_ROUGHNESS_BIN_POSITION = {
+    "rough_Q1": 10, "Q1_low_roughness": 10,
+    "rough_Q2": 30, "Q2": 30,
+    "rough_Q3": 50, "Q3": 50,
+    "rough_Q4": 70, "Q4": 70,
+    "rough_Q5": 90, "Q5_high_roughness": 90,
+}
+_ROUGHNESS_LABEL_POSITION = {"超堅め": 10, "堅め": 30, "普通": 50, "荒れ注意": 70, "波乱含み": 90}
+
+
 def render_roughness(row: pd.Series) -> None:
-    raw_score = row.get("roughness_score", 0)
-    # 新CSV: roughness_score は 0〜1、旧CSV: 0〜100
-    score = float(raw_score) * 100 if float(raw_score) <= 1.0 else float(raw_score)
-    # 新CSV: roughness_bin から日本語ラベルへ変換、旧CSV: roughness_label をそのまま使用
     roughness_bin = str(row.get("roughness_bin", ""))
     label = ROUGHNESS_BIN_TO_LABEL.get(roughness_bin) or row.get("roughness_label", "-")
     color = ROUGHNESS_LABEL_COLOR.get(str(label), "#5A6B7D")
+    # バー位置はbinで決定（生スコアは分布依存で見た目と一致しないため）
+    bar_pct = _ROUGHNESS_BIN_POSITION.get(roughness_bin) or _ROUGHNESS_LABEL_POSITION.get(str(label), 50)
 
     html = (
         '<div class="ai-card">'
         '<div class="ai-card-title">荒れやすさ</div>'
         f'<div style="font-size:20px;font-weight:700;color:{color};">{label}</div>'
-        f'<div style="font-size:13px;color:var(--ink-soft);margin-bottom:10px;">{score:.0f} / 100</div>'
-        '<div style="position:relative;height:24px;border-radius:12px;'
+        '<div style="position:relative;height:24px;border-radius:12px;margin-bottom:4px;'
         'background:linear-gradient(90deg,#E1F3EC 0%,#FFF4DD 50%,#FBE5E2 100%);overflow:hidden;">'
-        f'<div style="position:absolute;top:0;bottom:0;left:{score}%;width:3px;background:#1A2433;"></div>'
+        f'<div style="position:absolute;top:0;bottom:0;left:{bar_pct}%;width:3px;background:#1A2433;"></div>'
         "</div>"
         '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--ink-soft);margin-top:4px;">'
         "<span>超堅め</span><span>堅め</span><span>普通</span><span>荒れ注意</span><span>波乱含み</span>"
