@@ -149,6 +149,42 @@ def add_racer_master_features(
     return out
 
 
+_FULL_PROFILE_METRICS = ["進入率", "1着率", "2着率", "3着率", "平均ST", "ST順"]
+
+
+def add_full_course_profile_features(df: pd.DataFrame, racer_master: pd.DataFrame) -> pd.DataFrame:
+    """各艇について、実際に走った枠だけでなく1〜6コース全ての成績を紐づける。
+
+    列名は dataset_merged_202603_06_enriched.csv と同じ命名規則
+    (例: "1号艇_3コース_1着率") にそろえてあり、このデータセットへの
+    追記にそのまま使える。
+    """
+    out = df.copy()
+    master = racer_master.copy()
+    master["登録番号"] = normalize_registration_series(master["登録番号"])
+    master = master.dropna(subset=["登録番号"]).drop_duplicates("登録番号", keep="last")
+    master = master.set_index("登録番号")
+
+    for boat in BOATS:
+        reg_col = f"登番{boat}"
+        if reg_col in out.columns:
+            registrations = normalize_registration_series(out[reg_col])
+        else:
+            registrations = pd.Series(pd.NA, index=out.index, dtype="string")
+
+        for course in BOATS:
+            for metric in _FULL_PROFILE_METRICS:
+                src_col = f"{course}コース_{metric}"
+                dest_col = f"{boat}号艇_{course}コース_{metric}"
+                if src_col not in master.columns:
+                    out[dest_col] = 0.0
+                    continue
+                values = registrations.map(master[src_col])
+                fill_value = pd.to_numeric(master[src_col], errors="coerce").mean()
+                out[dest_col] = pd.to_numeric(values, errors="coerce").fillna(fill_value).fillna(0.0)
+    return out
+
+
 BASIC_NUMERIC_FEATURES = (
     WINRATE_COLS
     + ["勝率平均", "勝率最大", "勝率最小", "勝率標準偏差", "勝率レンジ"]

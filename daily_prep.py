@@ -29,7 +29,7 @@ import sys
 import time
 import random
 
-from boat_model.features import add_racer_master_features
+from boat_model.features import add_full_course_profile_features
 
 boats = [1, 2, 3, 4, 5, 6]
 venues_map = {
@@ -350,14 +350,14 @@ def enrich_races_with_racer_master(races_csv_path):
         return
 
     df = pd.read_csv(races_csv_path, dtype={"jcd": str})
-    if "boat1_course_win_rate" in df.columns:
+    if "1号艇_1コース_1着率" in df.columns:
         print("✅ 出走表には既に選手データが紐づけ済みのため、スキップします。")
         return
 
     racer_master = pd.read_csv(master_file)
-    enriched = add_racer_master_features(df, racer_master)
+    enriched = add_full_course_profile_features(df, racer_master)
     enriched.to_csv(races_csv_path, index=False, encoding='utf-8-sig')
-    print(f"💾 出走表に選手データを紐づけました: {races_csv_path}")
+    print(f"💾 出走表に選手データ（全コース分）を紐づけました: {races_csv_path}")
 
 
 if __name__ == "__main__":

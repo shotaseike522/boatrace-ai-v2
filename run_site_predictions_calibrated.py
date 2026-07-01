@@ -53,7 +53,20 @@ except (ImportError, AttributeError):
     _KNN_AVAILABLE = False
 
 
-DEFAULT_PAST = r"C:\Users\trium\OneDrive\Desktop\boat\dataset_1_past_201307_202602.csv"
+def _resolve_default_past_csv() -> str:
+    """過去データフォルダの中で一番新しい(月が大きい)dataset_1_past_*.csvを自動選択する。
+
+    毎月の月次更新でファイル名が dataset_1_past_201307_YYYYMM.csv と増えていくため、
+    ここを手動で書き換えなくても常に最新を指すようにしている。
+    """
+    boat_dir = Path(r"C:\Users\trium\OneDrive\Desktop\boat")
+    candidates = sorted(boat_dir.glob("dataset_1_past_*.csv"))
+    if candidates:
+        return str(candidates[-1])
+    return str(boat_dir / "dataset_1_past_201307_202602.csv")
+
+
+DEFAULT_PAST = _resolve_default_past_csv()
 DEFAULT_ARTIFACTS_DIR = "artifacts"
 DEFAULT_A_B_CACHE = "outputs/final_fixed_correction_cache/direct120_A_train_B_proba.npy"
 DEFAULT_AB_C_CACHE = "outputs/correction_sensitivity_cache/direct120_AB_train_C_proba.npy"
