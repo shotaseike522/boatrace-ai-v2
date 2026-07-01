@@ -1,9 +1,6 @@
 name: 競艇AI予想 日次バッチ
 
 on:
-  schedule:
-    # JST 6:15 に実行（UTC表記では前日 21:15）
-    - cron: '15 21 * * *'
   workflow_dispatch:
     # GAS (Google Apps Script) からの手動トリガー、および
     # GitHub画面からの「Run workflow」ボタンによる手動実行用

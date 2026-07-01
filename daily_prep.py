@@ -165,7 +165,7 @@ def run_site_predictions(races_csv):
     print(f"\n--- [2] AI予測の実行 ({hd_str}) を開始 ---")
     cmd = [
         sys.executable,
-        "run_site_predictions.py",
+        "run_site_predictions_calibrated.py",
         "--input", races_csv,
         "--output", output_csv,
         "--artifacts-dir", ARTIFACTS_DIR,

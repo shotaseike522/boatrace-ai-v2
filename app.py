@@ -42,6 +42,21 @@ ROUGHNESS_LABEL_COLOR = {
     "波乱含み": "#E2342B",
 }
 
+# 新CSVの roughness_bin 値 → 日本語ラベル
+ROUGHNESS_BIN_TO_LABEL = {
+    "rough_Q1": "超堅め",
+    "rough_Q2": "堅め",
+    "rough_Q3": "普通",
+    "rough_Q4": "荒れ注意",
+    "rough_Q5": "波乱含み",
+    # 旧フォーマット互換
+    "Q1_low_roughness": "超堅め",
+    "Q2": "堅め",
+    "Q3": "普通",
+    "Q4": "荒れ注意",
+    "Q5_high_roughness": "波乱含み",
+}
+
 MARK_STYLE = {
     "◎": ("#FFF4DD", "#C98A00"),
     "○": ("#E6F1FB", "#0046AD"),
@@ -288,8 +303,12 @@ def render_current_selection() -> None:
 
 
 def render_roughness(row: pd.Series) -> None:
-    score = row.get("roughness_score", 0)
-    label = row.get("roughness_label", "-")
+    raw_score = row.get("roughness_score", 0)
+    # 新CSV: roughness_score は 0〜1、旧CSV: 0〜100
+    score = float(raw_score) * 100 if float(raw_score) <= 1.0 else float(raw_score)
+    # 新CSV: roughness_bin から日本語ラベルへ変換、旧CSV: roughness_label をそのまま使用
+    roughness_bin = str(row.get("roughness_bin", ""))
+    label = ROUGHNESS_BIN_TO_LABEL.get(roughness_bin) or row.get("roughness_label", "-")
     color = ROUGHNESS_LABEL_COLOR.get(str(label), "#5A6B7D")
 
     html = (
@@ -314,27 +333,20 @@ def render_ai_predictions(row: pd.Series, top_n: int = 5) -> None:
     for rank in range(1, top_n + 1):
         ticket = row.get(f"ai_top{rank}_ticket", "")
         prob = row.get(f"ai_top{rank}_prob", 0.0)
-        mark = row.get(f"ai_top{rank}_mark", "")
-        bg, fg = MARK_STYLE.get(str(mark), MARK_STYLE[""])
         prob_pct = float(prob) * 100 if pd.notna(prob) else 0.0
         rows_html.append(
             f'<div style="display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);">'
-            f'<div style="width:30px;height:30px;border-radius:8px;background:{bg};color:{fg};'
-            f'display:flex;align-items:center;justify-content:center;font-weight:700;margin-right:12px;">{mark}</div>'
+            f'<div style="width:24px;font-size:12px;color:var(--ink-soft);font-weight:700;margin-right:12px;">{rank}</div>'
             f'<div style="flex:1;font-size:19px;font-weight:700;color:var(--ink);">{ticket}</div>'
             f'<div style="font-size:15px;color:var(--primary);font-weight:700;">{prob_pct:.1f}%</div>'
             f"</div>"
         )
 
-    legend_html = (
-        '<div style="display:flex;gap:14px;font-size:11px;color:var(--ink-soft);margin-top:10px;flex-wrap:wrap;">'
-        "<span>◎ 3モデル一致</span><span>○ 2モデル一致</span><span>▲△ 総合順位</span>"
-        "</div>"
-    )
     card_html = (
-        '<div class="ai-card"><div class="ai-card-title">'
-        f"AI予想 Top{top_n}</div>"
-        f"{''.join(rows_html)}{legend_html}</div>"
+        '<div class="ai-card"><div class="ai-card-title">AI予想確率</div>'
+        f"{''.join(rows_html)}"
+        '<div style="font-size:11px;color:var(--ink-soft);margin-top:10px;">過去データで実績補正した推定確率です。</div>'
+        "</div>"
     )
     st.markdown(card_html, unsafe_allow_html=True)
 
