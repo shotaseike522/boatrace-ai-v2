@@ -29,6 +29,8 @@ import sys
 import time
 import random
 
+from boat_model.features import add_racer_master_features
+
 boats = [1, 2, 3, 4, 5, 6]
 venues_map = {
     "01": "01_桐生", "02": "02_戸田", "03": "03_江戸川", "04": "04_平和島", "05": "05_多摩川", "06": "06_浜名湖",
@@ -331,6 +333,33 @@ def update_racer_master(session, today_tobans):
         print(f"💾 選手マスタを更新しました: {len(target_racers)}名")
 
 
+def enrich_races_with_racer_master(races_csv_path):
+    """出走表CSVに、その時点のracer_master.csvから選手のコース別成績を紐づけて追記する。
+
+    racer_master.csvは日々更新されるローリングスナップショットのため、
+    ここで追記される値は「その日の出走表取得時点で分かっていた最新の選手データ」であり、
+    月次で過去分をまとめてマージするより時系列的にはむしろ正確に近い
+    （月次マージだと、後の月に更新された値がその月より前のレースにも
+    紐づいてしまい、ずれが大きくなる）。
+    """
+    if races_csv_path is None:
+        return
+    master_file = 'racer_master.csv'
+    if not os.path.exists(master_file):
+        print("⚠️ racer_master.csvが無いため、選手データの紐づけをスキップします。")
+        return
+
+    df = pd.read_csv(races_csv_path, dtype={"jcd": str})
+    if "boat1_course_win_rate" in df.columns:
+        print("✅ 出走表には既に選手データが紐づけ済みのため、スキップします。")
+        return
+
+    racer_master = pd.read_csv(master_file)
+    enriched = add_racer_master_features(df, racer_master)
+    enriched.to_csv(races_csv_path, index=False, encoding='utf-8-sig')
+    print(f"💾 出走表に選手データを紐づけました: {races_csv_path}")
+
+
 if __name__ == "__main__":
     main_session = requests.Session()
     retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
@@ -341,3 +370,4 @@ if __name__ == "__main__":
     races_csv_path, today_racer_tobans = fetch_today_race_entries(main_session)
     run_site_predictions(races_csv_path)
     update_racer_master(main_session, today_racer_tobans)
+    enrich_races_with_racer_master(races_csv_path)
