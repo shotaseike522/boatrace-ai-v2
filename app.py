@@ -530,7 +530,7 @@ def render_pickup_races(df: pd.DataFrame, n: int = 6) -> None:
             jcd = str(item["jcd"]).zfill(2)
             rno = int(item["r"])
             raw = float(item["roughness_score"])
-            score = int(raw * 100 if raw <= 1.0 else raw)
+            score = round(raw * 100 if raw <= 1.0 else raw)
             venue_name = VENUES_MAP.get(jcd, jcd)
             is_active = (
                 st.session_state["target_jcd"] == jcd
