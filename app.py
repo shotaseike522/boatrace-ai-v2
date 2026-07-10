@@ -225,7 +225,7 @@ def load_today_predictions() -> tuple[pd.DataFrame | None, str | None]:
         return df, today_str
 
     pattern = os.path.join(OUTPUTS_DIR, "site_predictions_*.csv")
-    files = sorted(glob.glob(pattern))
+    files = sorted(f for f in glob.glob(pattern) if not f.endswith("_internal.csv"))
     if not files:
         return None, None
     latest = files[-1]
