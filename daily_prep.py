@@ -360,6 +360,27 @@ def enrich_races_with_racer_master(races_csv_path):
     print(f"💾 出走表に選手データ（全コース分）を紐づけました: {races_csv_path}")
 
 
+def run_pattern_alert():
+    """AI予想Top5・近似100レースTop5の一致パターンを検出し、LINE配信用JSONを出力する。
+
+    通常AI予想やサイト表示には一切影響しない別枠の処理。ここで例外が起きても
+    日次バッチ全体を止めないよう、失敗は警告表示のみに留める。
+    """
+    jst = pytz.timezone('Asia/Tokyo')
+    hd_str = datetime.now(jst).strftime("%Y%m%d")
+    print(f"\n--- [4] 一致パターン検出 ({hd_str}) を開始 ---")
+    try:
+        result = subprocess.run(
+            [sys.executable, "run_pattern_alert.py", "--date", hd_str],
+            check=True, capture_output=True, text=True,
+        )
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+    except Exception as exc:
+        print(f"⚠️ 一致パターン検出の実行に失敗しました（他の処理には影響しません）: {exc}")
+
+
 if __name__ == "__main__":
     main_session = requests.Session()
     retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
@@ -371,3 +392,4 @@ if __name__ == "__main__":
     run_site_predictions(races_csv_path)
     update_racer_master(main_session, today_racer_tobans)
     enrich_races_with_racer_master(races_csv_path)
+    run_pattern_alert()
