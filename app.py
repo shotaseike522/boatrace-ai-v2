@@ -412,7 +412,8 @@ def render_similar_race_analysis(row: pd.Series) -> None:
             )
         bars_html = (
             '<div style="font-size:11px;color:var(--ink-soft);margin-bottom:6px;">'
-            "配当分布(直近3年全体を20等分した区間からのズレ。赤=高配当寄り、青=低配当寄り)</div>"
+            "配当分布(直近3年全体を20等分した区間との比較。赤=平均よりこの金額帯が出やすい、"
+            "青=平均よりこの金額帯が出にくい)</div>"
             f"{''.join(rows)}"
         )
 
@@ -447,13 +448,13 @@ def render_pickup_races(df: pd.DataFrame) -> None:
     )
     if pickup.empty:
         st.markdown(
-            '<div class="ai-card-title">本日のおすすめレース(2連複アラインドペア)</div>'
+            '<div class="ai-card-title">本日のおすすめレース</div>'
             '<div style="font-size:13px;color:var(--ink-soft);">本日は該当するレースがありませんでした。</div>',
             unsafe_allow_html=True,
         )
         return
 
-    st.markdown('<div class="ai-card-title">本日のおすすめレース(2連複アラインドペア 51%以上)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="ai-card-title">本日のおすすめレース</div>', unsafe_allow_html=True)
 
     n_cols = 3
     rows = [pickup.iloc[i : i + n_cols] for i in range(0, len(pickup), n_cols)]
