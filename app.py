@@ -395,30 +395,39 @@ def render_similar_race_analysis(row: pd.Series) -> None:
 
     bars_html = ""
     if pct_actual and deviation and labels:
-        max_pct = max(pct_actual) or 1.0
-        baseline_pos = min(5.0 / max_pct * 100, 100)  # 平均5%の位置(バー内の%)
-        rows = []
-        for label, pct, dev in zip(labels, pct_actual, deviation):
-            width = min(pct / max_pct * 100, 100)
-            color = "#E2342B" if dev > 0 else "#0046AD"
-            bar = (
-                '<div style="flex:1;height:14px;background:var(--bg);border-radius:3px;position:relative;">'
-                f'<div style="position:absolute;top:0;bottom:0;left:0;width:{width}%;background:{color};border-radius:3px;"></div>'
-                f'<div style="position:absolute;top:-2px;bottom:-2px;left:{baseline_pos}%;width:1px;background:var(--ink-soft);"></div>'
-                "</div>"
+        n = len(pct_actual)
+        max_pct = max(pct_actual + [5.0]) * 1.1  # 平均線が常に収まるよう5%も含めて余白を確保
+        chart_w, chart_h = 320, 90
+        gap = 2
+        bar_w = (chart_w - gap * (n - 1)) / n
+        baseline_y = chart_h - (5.0 / max_pct) * chart_h
+
+        bars_svg = []
+        for i, pct in enumerate(pct_actual):
+            x = i * (bar_w + gap)
+            h = (pct / max_pct) * chart_h
+            y = chart_h - h
+            color = "#E2342B" if pct > 5.0 else "#0046AD"
+            bars_svg.append(
+                f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" height="{max(h,1):.1f}" '
+                f'rx="3" fill="{color}"><title>{labels[i]}: {pct:.1f}%({deviation[i]:+.1f}pt)</title></rect>'
             )
-            rows.append(
-                '<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">'
-                f'<div style="font-size:10px;color:var(--ink-soft);width:88px;">{label}</div>'
-                f"{bar}"
-                f'<div style="font-size:10px;color:var(--ink);width:66px;text-align:right;">{pct:.1f}%({dev:+.1f}pt)</div>'
-                "</div>"
-            )
+        svg = (
+            f'<svg viewBox="0 0 {chart_w} {chart_h + 14}" style="width:100%;height:auto;" '
+            'role="img" aria-label="配当分布の棒グラフ。横軸は配当額が低い順、縦軸は出現割合。破線は全体平均5%">'
+            f'<line x1="0" y1="{baseline_y:.1f}" x2="{chart_w}" y2="{baseline_y:.1f}" '
+            'stroke="var(--ink-soft)" stroke-width="1" stroke-dasharray="3,3"/>'
+            f'<text x="{chart_w}" y="{baseline_y - 4:.1f}" text-anchor="end" font-size="8" fill="var(--ink-soft)">平均5%</text>'
+            f"{''.join(bars_svg)}"
+            f'<text x="0" y="{chart_h + 12}" font-size="9" fill="var(--ink-soft)">{labels[0]}</text>'
+            f'<text x="{chart_w}" y="{chart_h + 12}" text-anchor="end" font-size="9" fill="var(--ink-soft)">{labels[-1]}</text>'
+            "</svg>"
+        )
         bars_html = (
-            '<div style="font-size:11px;color:var(--ink-soft);margin-bottom:6px;">'
-            "配当分布(直近3年の類似レースでの実際の出現割合。縦線は全体平均の5%。"
-            "赤=平均より出やすい、青=平均より出にくい)</div>"
-            f"{''.join(rows)}"
+            '<div style="font-size:11px;color:var(--ink-soft);margin-bottom:8px;">'
+            "配当分布(直近3年の類似レースでの実際の出現割合、配当額が低い順に20区間。"
+            "破線=全体平均5%。赤=平均より出やすい、青=平均より出にくい)</div>"
+            f"{svg}"
         )
 
     card_html = (
