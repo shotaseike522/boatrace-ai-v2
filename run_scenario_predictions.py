@@ -152,7 +152,7 @@ def main() -> None:
         # (直前情報が出た後に荒れ度も反映して再計算する運用を想定)
         fav_rate = float(race_df.loc[race_df["boat_num"] == favorite, "全国勝率"].iloc[0])
         this_bin = strength_bin(fav_rate)
-        kimarite_dist, bucket_pct_deviation = None, None
+        kimarite_dist, bucket_pct_actual, bucket_pct_deviation = None, None, None
         try:
             matches = similar_race.loc[(jcd, this_bin, slice(None))]
             if isinstance(matches, pd.Series):
@@ -170,6 +170,7 @@ def main() -> None:
                 total_payout_n = combined_counts.sum()
                 if total_payout_n > 0:
                     bucket_pct = combined_counts / total_payout_n * 100
+                    bucket_pct_actual = [round(float(p), 1) for p in bucket_pct]
                     bucket_pct_deviation = [round(float(p) - 5.0, 1) for p in bucket_pct]
         except KeyError:
             pass
@@ -191,6 +192,7 @@ def main() -> None:
             "strength_bin": this_bin,
             "kimarite_dist": json.dumps(kimarite_dist, ensure_ascii=False) if kimarite_dist else None,
             "payout_bucket_labels": json.dumps(payout_bucket_labels, ensure_ascii=False),
+            "payout_bucket_pct": json.dumps(bucket_pct_actual) if bucket_pct_actual else None,
             "payout_bucket_deviation": json.dumps(bucket_pct_deviation) if bucket_pct_deviation else None,
         }
         results.append(row)

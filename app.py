@@ -369,7 +369,7 @@ def render_one_head_high_confidence(row: pd.Series) -> None:
 
 
 def render_similar_race_analysis(row: pd.Series) -> None:
-    """類似レース分析: 決まり手%(数字列挙型)＋3連単配当分布(母集団比の偏り)を表示する。"""
+    """類似レース分析: 決まり手%(数字列挙型)＋3連単配当分布(実際の割合＋平均比)を表示する。"""
     try:
         kimarite = json.loads(row["kimarite_dist"]) if pd.notna(row.get("kimarite_dist")) else None
     except (ValueError, TypeError):
@@ -378,6 +378,10 @@ def render_similar_race_analysis(row: pd.Series) -> None:
         labels = json.loads(row["payout_bucket_labels"]) if pd.notna(row.get("payout_bucket_labels")) else []
     except (ValueError, TypeError):
         labels = []
+    try:
+        pct_actual = json.loads(row["payout_bucket_pct"]) if pd.notna(row.get("payout_bucket_pct")) else None
+    except (ValueError, TypeError):
+        pct_actual = None
     try:
         deviation = json.loads(row["payout_bucket_deviation"]) if pd.notna(row.get("payout_bucket_deviation")) else None
     except (ValueError, TypeError):
@@ -390,30 +394,30 @@ def render_similar_race_analysis(row: pd.Series) -> None:
         kimarite_html = '<div style="font-size:13px;color:var(--ink-soft);margin-bottom:12px;">決まり手データなし</div>'
 
     bars_html = ""
-    if deviation and labels:
-        max_abs = max(abs(d) for d in deviation) or 1.0
+    if pct_actual and deviation and labels:
+        max_pct = max(pct_actual) or 1.0
+        baseline_pos = min(5.0 / max_pct * 100, 100)  # 平均5%の位置(バー内の%)
         rows = []
-        for label, dev in zip(labels, deviation):
-            width = min(abs(dev) / max_abs * 50, 50)
+        for label, pct, dev in zip(labels, pct_actual, deviation):
+            width = min(pct / max_pct * 100, 100)
             color = "#E2342B" if dev > 0 else "#0046AD"
-            side = "left" if dev >= 0 else "right"
             bar = (
                 '<div style="flex:1;height:14px;background:var(--bg);border-radius:3px;position:relative;">'
-                f'<div style="position:absolute;top:0;bottom:0;{side}:50%;width:{width}%;background:{color};border-radius:3px;"></div>'
-                '<div style="position:absolute;top:0;bottom:0;left:50%;width:1px;background:var(--line);"></div>'
+                f'<div style="position:absolute;top:0;bottom:0;left:0;width:{width}%;background:{color};border-radius:3px;"></div>'
+                f'<div style="position:absolute;top:-2px;bottom:-2px;left:{baseline_pos}%;width:1px;background:var(--ink-soft);"></div>'
                 "</div>"
             )
             rows.append(
                 '<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;">'
                 f'<div style="font-size:10px;color:var(--ink-soft);width:88px;">{label}</div>'
                 f"{bar}"
-                f'<div style="font-size:10px;color:var(--ink-soft);width:40px;text-align:right;">{dev:+.1f}pt</div>'
+                f'<div style="font-size:10px;color:var(--ink);width:66px;text-align:right;">{pct:.1f}%({dev:+.1f}pt)</div>'
                 "</div>"
             )
         bars_html = (
             '<div style="font-size:11px;color:var(--ink-soft);margin-bottom:6px;">'
-            "配当分布(直近3年全体を20等分した区間との比較。赤=平均よりこの金額帯が出やすい、"
-            "青=平均よりこの金額帯が出にくい)</div>"
+            "配当分布(直近3年の類似レースでの実際の出現割合。縦線は全体平均の5%。"
+            "赤=平均より出やすい、青=平均より出にくい)</div>"
             f"{''.join(rows)}"
         )
 

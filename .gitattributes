@@ -3,3 +3,8 @@ artifacts/**/*.npy filter=lfs diff=lfs merge=lfs -text
 artifacts/**/*.csv filter=lfs diff=lfs merge=lfs -text
 data/kimarite_payout_seed_pre202607.csv filter=lfs diff=lfs merge=lfs -text
 data/site_archive_rolling3y.csv filter=lfs diff=lfs merge=lfs -text
+
+# LightGBMのモデルダンプ(strength_model.txt)はLF区切りの厳密な固定書式で、
+# CRLFに変換されるとパース不能になり壊れる(Windows+core.autocrlf=trueで
+# 実際に発生した)。改行コード変換を一切行わないよう明示的に指定する。
+artifacts/scenario/*.txt -text eol=lf
