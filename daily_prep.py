@@ -1,19 +1,15 @@
-"""日次バッチ: 出走表取得 -> 新AIモデル(boat_model)での予測実行 -> 選手マスタ更新。
+"""日次バッチ: 前日結果取得(mbrace.or.jp K形式) -> ローリング3年アーカイブ更新
+   -> 当日出走表取得(mbrace.or.jp B形式) -> ローリング3年アーカイブ追記・トリム
+   -> シナリオ予測実行(run_scenario_predictions.py) -> 選手マスタ更新。
 
-旧システム(エンジンA/B/Cのロジスティック回帰・パターンマスタ・類似100レース)は
-boat_model配下の新システム(LightGBM direct120 / position6 / KNN500 / Pairwise)に
-置き換えられた。このファイルはスクレイピングと選手マスタ更新のみを担当し、
-予測計算そのものは run_site_predictions.py に委譲する。
+旧システム(AI Top5・2連複Best3・近似100レースのKNN)は展開シナリオ方式
+(本命/対抗/他有力の3連単買い目 + 類似レース分析)に置き換えられた。
+出走表・結果の取得は、以前はboatrace.jpのHTML画面をスクレイピングしていたが、
+mbrace.or.jp公式のB/K形式LZHアーカイブを直接ダウンロード・解析する方式
+(boat_model.parse_bk_format, mbrace_download.py)に切り替えている。
 
-出力される出走表CSVの列名は、新システム(boat_model.features)が要求する形式に
-そろえている:
-  - jcd: ゼロ埋め2桁文字列 (例: "09")
-  - r: レース番号 (int)
-  - 勝率1〜勝率6: 全国勝率の生値 (0〜10程度のレンジ。レース内平均差し引きは行わない)
-  - 登番1〜登番6: 選手登録番号
-
-旧システムの `相対勝率_1〜6`(平均差し引き済み)・`登番_1〜6`(アンダースコア区切り)
-という列名は使わない。相対化は新システム側の add_basic_features() が内部で行う。
+強さモデル・選手スタイル・類似レース表の再学習は月次(retrain_monthly.py、
+別ワークフローから実行)で行い、このファイルでは行わない。
 """
 
 import requests
@@ -22,6 +18,7 @@ from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
+from pathlib import Path
 import pytz
 import os
 import subprocess
@@ -56,27 +53,23 @@ def safe_float(val):
         return 0.0
 
 
-def get_active_jcds(session, target_date_str):
-    index_url = f"https://www.boatrace.jp/owpc/pc/race/index?hd={target_date_str}"
-    active_jcds = []
-    place_dict = {v.split('_')[1]: int(k) for k, v in venues_map.items()}
-    try:
-        res = session.get(index_url, timeout=30)
-        soup = BeautifulSoup(res.content, "html.parser")
-        for td in soup.find_all("td", class_="is-arrow1 is-fBold is-fs15"):
-            img = td.find("img", alt=True)
-            if img and img["alt"] in place_dict:
-                active_jcds.append(place_dict[img["alt"]])
-    except Exception:
-        active_jcds = list(range(1, 25))
-    return active_jcds
-
-
 def fetch_today_race_entries(session):
     """本日の出走表を取得し、新システム形式のCSV(data/races_YYYYMMDD.csv)に保存する。
 
+    以前はboatrace.jpのHTML画面をスクレイピングしていたが、mbrace.or.jp公式の
+    番組表(B形式)LZHアーカイブが当日分もレース開始前に公開されていることを
+    確認できたため、そちらを直接ダウンロード・解析する方式に切り替えた
+    (HTML構造の変化に弱いスクレイピングより、21年分実績のある固定長パーサー
+    `boat_model.parse_bk_format` を使う方が壊れにくい)。sessionパラメータは
+    他の関数との呼び出し互換のために残しているが、この関数内では使用しない。
+
     戻り値: (出走表CSVのパス または None, 取得した選手登録番号のリスト)
     """
+    import tempfile
+
+    from boat_model.parse_bk_format import extract_lzh_text, parse_b_file
+    from mbrace_download import download_lzh
+
     jst = pytz.timezone('Asia/Tokyo')
     hd_str = datetime.now(jst).strftime("%Y%m%d")
     print(f"\n--- [1] 出走表取得 ({hd_str}) を開始 ---")
@@ -99,43 +92,42 @@ def fetch_today_race_entries(session):
         except Exception:
             pass
 
-    active_jcds = get_active_jcds(session, hd_str)
+    with tempfile.TemporaryDirectory() as tmp_dir_str:
+        tmp_dir = Path(tmp_dir_str)
+        lzh_path = download_lzh("B", hd_str, tmp_dir)
+        if lzh_path is None:
+            print(f"⚠️ 本日 ({hd_str}) の番組表LZHがまだ公開されていません。")
+            return None, []
+        raw = extract_lzh_text(lzh_path, tmp_dir)
+        b_races = parse_b_file(raw)
+
     all_rows = []
     unique_tobans = set()
 
-    for jcd_int in active_jcds:
-        jcd_str = f"{jcd_int:02d}"
-        for rno in range(1, 13):
-            url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd_str}&hd={hd_str}"
-            try:
-                res = session.get(url, timeout=15)
-                soup = BeautifulSoup(res.content, "html.parser")
-                tbodies = soup.find_all("tbody", class_="is-fs12")
-                if len(tbodies) != 6:
-                    continue
-                rates, tobans = [], []
-                for tbody in tbodies:
-                    tds = tbody.find("tr").find_all("td", recursive=False) if tbody.find("tr") else []
-                    toban = (
-                        tds[2].find("div", class_="is-fs11").get_text().split("/")[0].strip()
-                        if len(tds) > 2 and tds[2].find("div", class_="is-fs11")
-                        else ""
-                    )
-                    rate_txt = tds[4].get_text(separator="\n").strip().split('\n')[0] if len(tds) > 4 else ""
-                    tobans.append(toban)
-                    # 💡 生の全国勝率(0〜10程度)をそのまま使う。平均差し引きはしない。
-                    rates.append(float(rate_txt) if rate_txt and rate_txt != "-.--" else 0.0)
-                    if toban.isdigit() and len(toban) == 4:
-                        unique_tobans.add(toban)
-
-                if len(rates) == 6:
-                    row = {"date": hd_str, "jcd": jcd_str, "r": rno}
-                    for w in range(1, 7):
-                        row[f"登番{w}"] = tobans[w - 1]
-                        row[f"勝率{w}"] = rates[w - 1]
-                    all_rows.append(row)
-            except Exception:
-                continue
+    for race in b_races:
+        boats = race["boats"]
+        if len(boats) != 6:
+            continue
+        row = {"date": hd_str, "jcd": race["jcd"], "r": race["r"]}
+        for w in range(1, 7):
+            b = boats[w - 1]
+            toban = b["登番"]
+            row[f"登番{w}"] = toban
+            row[f"級別{w}"] = b["級別"]
+            row[f"年齢{w}"] = safe_float(b["年齢"])
+            row[f"体重{w}"] = safe_float(b["体重"])
+            # 💡 生の全国勝率(0〜10程度)をそのまま使う。平均差し引きはしない。
+            row[f"勝率{w}"] = safe_float(b["全国勝率"])
+            row[f"全国2率{w}"] = safe_float(b["全国2率"])
+            row[f"当地勝率{w}"] = safe_float(b["当地勝率"])
+            row[f"当地2率{w}"] = safe_float(b["当地2率"])
+            row[f"モーター番号{w}"] = b["モーターNo"]
+            row[f"モーター2率{w}"] = safe_float(b["モーター2率"])
+            row[f"ボート番号{w}"] = b["ボートNo"]
+            row[f"ボート2率{w}"] = safe_float(b["ボート2率"])
+            if toban.isdigit() and len(toban) == 4:
+                unique_tobans.add(toban)
+        all_rows.append(row)
 
     if not all_rows:
         print("⚠️ 本日の出走表が取得できませんでした。")
@@ -148,7 +140,11 @@ def fetch_today_race_entries(session):
 
 
 def run_site_predictions(races_csv):
-    """run_site_predictions.py をサブプロセスとして実行し、予測CSVを生成する。"""
+    """run_scenario_predictions.py をサブプロセスとして実行し、シナリオ予測CSVを生成する。
+
+    以前はrun_site_predictions_calibrated.py(AI Top5/2連複Best3/近似100レース系)
+    を呼んでいたが、展開シナリオ方式(run_scenario_predictions.py)に置き換えた。
+    """
     if races_csv is None:
         print("⚠️ 出走表が無いため、予測処理をスキップします。")
         return None
@@ -156,48 +152,55 @@ def run_site_predictions(races_csv):
     jst = pytz.timezone('Asia/Tokyo')
     hd_str = datetime.now(jst).strftime("%Y%m%d")
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
-    output_csv = os.path.join(OUTPUTS_DIR, f"site_predictions_{hd_str}.csv")
+    output_csv = os.path.join(OUTPUTS_DIR, f"scenario_predictions_{hd_str}.csv")
 
     # 💡 二重実行防止: GAS(0:00〜1:00頃)が既に成功していれば、
     # GitHub Actions(6:15の保険実行)はこの予測処理をスキップする。
     if os.path.exists(output_csv):
-        print(f"✅ 本日 ({hd_str}) の予測は既に作成済みのため、AI予測処理をスキップします: {output_csv}")
+        print(f"✅ 本日 ({hd_str}) の予測は既に作成済みのため、シナリオ予測処理をスキップします: {output_csv}")
         return output_csv
 
-    print(f"\n--- [2] AI予測の実行 ({hd_str}) を開始 ---")
+    print(f"\n--- [2] シナリオ予測の実行 ({hd_str}) を開始 ---")
     cmd = [
         sys.executable,
-        "run_site_predictions_calibrated.py",
+        "run_scenario_predictions.py",
         "--input", races_csv,
         "--output", output_csv,
-        "--artifacts-dir", ARTIFACTS_DIR,
     ]
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         print(result.stdout)
         if result.stderr:
             print(result.stderr)
-        print(f"✅ AI予測が完了しました: {output_csv}")
+        print(f"✅ シナリオ予測が完了しました: {output_csv}")
         return output_csv
     except subprocess.CalledProcessError as exc:
-        print(f"⚠️ run_site_predictions.py の実行に失敗しました: {exc}")
+        print(f"⚠️ run_scenario_predictions.py の実行に失敗しました: {exc}")
         print(exc.stdout)
         print(exc.stderr)
         return None
     except FileNotFoundError:
-        print("⚠️ run_site_predictions.py が見つかりません。リポジトリ直下で実行してください。")
+        print("⚠️ run_scenario_predictions.py が見つかりません。リポジトリ直下で実行してください。")
         return None
 
 
 def fetch_results_and_archive(session):
     """昨日の結果を取得し、過去データとして蓄積する。
 
-    NOTE: 新システム(boat_model)は dataset_1_past / dataset_2_recent という
-    まとまったCSVを月次で学習に使う設計のため、この関数は現時点では
-    「結果を取得して outputs/results_YYYYMMDD.csv に保存するだけ」に留めている。
-    daily_predictions.csv との突き合わせ・learning_data蓄積(旧仕様)は廃止した。
-    新システム用の学習データ蓄積パイプラインは別途設計する。
+    以前はboatrace.jpのHTML画面をスクレイピングしていたが、mbrace.or.jp公式の
+    競走成績(K形式)LZHアーカイブを直接ダウンロード・解析する方式に切り替えた
+    (fetch_today_race_entriesと同じ理由)。決まり手・天候(風速/波高等)・
+    全6艇のST・主要payout種別(単勝を除く2連単/2連複/3連単/3連複)がまとめて
+    取得できる。ここでの出力(outputs/results_YYYYMMDD.csv)は
+    rolling_archive.update_archive_with_results() が読み込み、ローリング3年
+    アーカイブ(data/site_archive_rolling3y.csv)に反映する。
+    sessionパラメータは呼び出し互換のために残しているが使用しない。
     """
+    import tempfile
+
+    from boat_model.parse_bk_format import extract_lzh_text, parse_k_file
+    from mbrace_download import download_lzh
+
     jst = pytz.timezone('Asia/Tokyo')
     yesterday = datetime.now(jst) - pd.Timedelta(days=1)
     hd_str = yesterday.strftime("%Y%m%d")
@@ -207,41 +210,55 @@ def fetch_results_and_archive(session):
     out_file = os.path.join(OUTPUTS_DIR, f"results_{hd_str}.csv")
     if os.path.exists(out_file):
         print(f"✅ {hd_str} の結果は取得済みのため、通信処理をスキップします。")
-        return
+        return out_file
 
-    active_jcds = get_active_jcds(session, hd_str)
+    with tempfile.TemporaryDirectory() as tmp_dir_str:
+        tmp_dir = Path(tmp_dir_str)
+        lzh_path = download_lzh("K", hd_str, tmp_dir)
+        if lzh_path is None:
+            print(f"⚠️ 昨日 ({hd_str}) の競走成績LZHがまだ公開されていません。")
+            return None
+        raw = extract_lzh_text(lzh_path, tmp_dir)
+        k_races, k_payouts = parse_k_file(raw)
+
     all_results = []
+    for race in k_races:
+        boats = race["boats"]
+        by_rank = {b["着順"]: b for b in boats}
+        r1 = by_rank.get("01", {}).get("艇番")
+        r2 = by_rank.get("02", {}).get("艇番")
+        r3 = by_rank.get("03", {}).get("艇番")
+        if not r1:
+            continue
 
-    for jcd_int in active_jcds:
-        jcd_str = f"{jcd_int:02d}"
-        for rno in range(1, 13):
-            url = f"https://www.boatrace.jp/owpc/pc/race/raceresult?rno={rno}&jcd={jcd_str}&hd={hd_str}"
-            try:
-                res = session.get(url, timeout=15)
-                soup = BeautifulSoup(res.content, "html.parser")
-                r1, r2, r3, p = None, None, None, None
-                for tr in soup.find_all("tr"):
-                    if "3連単" in tr.get_text():
-                        nums = tr.find_all("span", class_="numberSet1_number")
-                        payout = tr.find("span", class_="is-payout1")
-                        if len(nums) >= 3 and payout:
-                            r1, r2, r3 = nums[0].text.strip(), nums[1].text.strip(), nums[2].text.strip()
-                            p = payout.text.replace("¥", "").replace(",", "").replace("円", "").strip()
-                            break
-                if r1 and p:
-                    all_results.append(
-                        {"date": hd_str, "jcd": jcd_str, "r": rno, "r1": r1, "r2": r2, "r3": r3, "3rt": p}
-                    )
-            except Exception:
-                continue
+        payout = k_payouts.get((race["jcd"], race["r"]), {})
+        weather = race.get("weather", {})
+        row = {
+            "date": hd_str, "jcd": race["jcd"], "r": race["r"],
+            "r1": r1, "r2": r2, "r3": r3,
+            "3rt": payout.get("3連単_払戻"),
+            "決まり手": race.get("決まり手"),
+            "天候": weather.get("天候"), "風速": weather.get("風速"), "波高": weather.get("波高"),
+            "水温": None, "気温": None,
+            "単勝_払戻": None, "複勝1_払戻": None,
+            "3連単_払戻": payout.get("3連単_払戻"), "3連複_払戻": payout.get("3連複_払戻"),
+            "2連単_払戻": payout.get("2連単_払戻"), "2連複_払戻": payout.get("2連複_払戻"),
+        }
+        for boat in boats:
+            w = boat["艇番"]
+            if w.isdigit():
+                row[f"着順{w}"] = boat["着順"]
+                row[f"ST{w}"] = boat["ST"]
+        all_results.append(row)
 
     if not all_results:
         print("⚠️ 昨日の結果が取得できませんでした。")
-        return
+        return None
 
     df_results = pd.DataFrame(all_results)
     df_results.to_csv(out_file, index=False, encoding='utf-8-sig')
     print(f"💾 昨日の結果を保存しました: {out_file} ({len(df_results)}レース)")
+    return out_file
 
 
 def update_racer_master(session, today_tobans):
@@ -382,13 +399,21 @@ def run_pattern_alert():
 
 
 if __name__ == "__main__":
+    import rolling_archive
+
     main_session = requests.Session()
     retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
     main_session.mount('https://', HTTPAdapter(max_retries=retries))
     main_session.headers.update({'User-Agent': 'Mozilla/5.0'})
 
-    fetch_results_and_archive(main_session)
+    results_csv_path = fetch_results_and_archive(main_session)
+    rolling_archive.update_archive_with_results(results_csv_path)
+
     races_csv_path, today_racer_tobans = fetch_today_race_entries(main_session)
+    rolling_archive.append_entries_to_archive(races_csv_path)
+    rolling_archive.trim_archive()
+
+    # TODO(Phase5): run_site_predictions()をrun_scenario_predictions.pyの呼び出しに置き換える
     run_site_predictions(races_csv_path)
     update_racer_master(main_session, today_racer_tobans)
     enrich_races_with_racer_master(races_csv_path)

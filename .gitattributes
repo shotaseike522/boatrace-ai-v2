@@ -1,3 +1,5 @@
 artifacts/**/*.joblib filter=lfs diff=lfs merge=lfs -text
 artifacts/**/*.npy filter=lfs diff=lfs merge=lfs -text
 artifacts/**/*.csv filter=lfs diff=lfs merge=lfs -text
+data/kimarite_payout_seed_pre202607.csv filter=lfs diff=lfs merge=lfs -text
+data/site_archive_rolling3y.csv filter=lfs diff=lfs merge=lfs -text
