@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import pickle
+from itertools import combinations
 from pathlib import Path
 
 import lightgbm as lgb
@@ -16,7 +18,16 @@ import numpy as np
 import pandas as pd
 
 from boat_model import scenario_lib as sl
+from boat_model.features import add_basic_features, TRIFECTA_PERMUTATIONS
+from boat_model.models import ApproxRaceKNNModel  # noqa: F401 (pickle.loadに必要)
 from boat_model.pl_probabilities import trifecta_probabilities, pair_probabilities, triple_label, TRIPLES
+
+PAIRS15 = list(combinations(range(1, 7), 2))
+PAIR15_INDEX = {p: i for i, p in enumerate(PAIRS15)}
+TRIOS20 = list(combinations(range(1, 7), 3))
+TRIO20_INDEX = {t: i for i, t in enumerate(TRIOS20)}
+PERM_TO_PAIR20 = np.array([PAIR15_INDEX[tuple(sorted(p[:2]))] for p in TRIFECTA_PERMUTATIONS])
+PERM_TO_TRIO20 = np.array([TRIO20_INDEX[tuple(sorted(p[:3]))] for p in TRIFECTA_PERMUTATIONS])
 
 
 def _tickets_to_json(tickets: list[tuple]) -> str:
@@ -114,6 +125,39 @@ def build_trow(theta_row: np.ndarray) -> pd.Series:
     return pd.Series(data)
 
 
+def compute_knn_top_picks(scored: pd.DataFrame, knn_model: ApproxRaceKNNModel) -> tuple[dict, dict]:
+    """当日の全レースについて、近似100レース(KNN)モデルの本命2連複・3連複
+    (それぞれ確率最大の組)を一括計算する。race_id -> pair_idx/trio_idx の辞書を返す。
+    """
+    wide = scored.pivot_table(index=["date", "jcd", "r"], columns="boat_num", values="全国勝率", aggfunc="first")
+    wide.columns = [f"勝率{int(c)}" for c in wide.columns]
+    wide = wide.reset_index()
+    wide["race_id"] = wide["date"].astype(str) + "_" + wide["jcd"].astype(str) + "_" + wide["r"].astype(str)
+
+    eval_df = add_basic_features(wide)
+    proba = knn_model.predict_proba(eval_df)
+    n = len(eval_df)
+    pair_probs = np.zeros((n, 15))
+    trio_probs = np.zeros((n, 20))
+    for k in range(120):
+        pair_probs[:, PERM_TO_PAIR20[k]] += proba[:, k]
+        trio_probs[:, PERM_TO_TRIO20[k]] += proba[:, k]
+
+    top_pair = dict(zip(wide["race_id"], np.argmax(pair_probs, axis=1)))
+    top_trio = dict(zip(wide["race_id"], np.argmax(trio_probs, axis=1)))
+    return top_pair, top_trio
+
+
+def model_top_trio(trow: pd.Series) -> tuple[int, float]:
+    """強さモデル自身の本命3連複(確率最大の3艇の組、順不同)のindexと確率を返す。"""
+    tri_vals = np.array([trow[f"prob_{triple_label(t)}"] for t in range(len(TRIPLES))])
+    trio_probs = np.zeros(20)
+    for k in range(120):
+        trio_probs[PERM_TO_TRIO20[k]] += tri_vals[k]
+    idx = int(np.argmax(trio_probs))
+    return idx, float(trio_probs[idx])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
@@ -127,6 +171,13 @@ def main() -> None:
     model = lgb.Booster(model_file=str(ARTIFACTS_DIR / "strength_model.txt"))
     medians = pd.read_pickle(ARTIFACTS_DIR / "base_field_medians.pkl")
     scored = score_races(features, model, medians)
+
+    print("近似100レース(KNN)モデル読み込み・本日レースの一致判定計算中...")
+    with open(ARTIFACTS_DIR / "knn_model.pkl", "rb") as f:
+        knn_model = pickle.load(f)
+    with open(ARTIFACTS_DIR / "knn_calibration_ratios.json", encoding="utf-8") as f:
+        knn_calibration = json.load(f)
+    knn_top_pair, knn_top_trio = compute_knn_top_picks(scored, knn_model)
 
     print("選手スタイル・非1着時プロファイル・類似レース表読み込み中...")
     style = sl.load_racer_style()
@@ -148,6 +199,22 @@ def main() -> None:
         trow = build_trow(theta)
 
         scenarios = sl.generate_scenarios(win_prob, trow, toubans, style, subplace, weighting="multiply")
+
+        # KNN(近似100レース)モデルとの一致較正: 強さモデル自身の本命3連複(確率最大の
+        # 3艇の組)がKNNモデルの本命3連複と一致するかどうかで、実際の的中率が
+        # 有意に(かつ2024/2025/2026年で安定して)変わることを検証済み。一致状況に
+        # 応じた較正比率を、その3艇の組と一致するチケットの表示確率にだけ掛ける
+        # (較正した対象は「モデル自身の本命3連複」であり、それ以外の候補には
+        # 未検証のため適用しない)。
+        race_id = f"{date}_{jcd}_{r}"
+        top_trio_idx, _ = model_top_trio(trow)
+        top_trio_boats = frozenset(TRIOS20[top_trio_idx])
+        trio_agree = knn_top_trio.get(race_id) == top_trio_idx
+        trio_ratio = knn_calibration["trio_match_ratio"] if trio_agree else knn_calibration["trio_mismatch_ratio"]
+
+        def _scale_tickets(tickets):
+            return [(combo, min(p * trio_ratio, 1.0) if frozenset(combo) == top_trio_boats else p)
+                    for combo, p in tickets]
 
         favorite = scenarios["scenario1"]["winner_boat"]
         challenger = scenarios["scenario2"]["winner_boat"]
@@ -197,14 +264,16 @@ def main() -> None:
             "date": date, "jcd": jcd, "r": r,
             "favorite_boat": favorite,
             "favorite_nige_rate": round(float(nige_rate), 1) if nige_rate is not None else None,
-            "scenario1_tickets": _tickets_to_json(scenarios["scenario1"]["tickets"]),
+            "scenario1_tickets": _tickets_to_json(_scale_tickets(scenarios["scenario1"]["tickets"])),
             "challenger_boat": challenger,
             "challenger_makuri_rate": round(float(makuri_rate), 1) if makuri_rate is not None else None,
-            "scenario2_tickets": _tickets_to_json(scenarios["scenario2"]["tickets"]),
-            "scenario3_tickets": _tickets_to_json(scenarios["scenario3"]["tickets"]),
+            "scenario2_tickets": _tickets_to_json(_scale_tickets(scenarios["scenario2"]["tickets"])),
+            "scenario3_tickets": _tickets_to_json(_scale_tickets(scenarios["scenario3"]["tickets"])),
             "aligned_pair": "-".join(map(str, aligned_pair)) if aligned_pair else None,
             "aligned_pair_prob": round(float(aligned_prob), 4) if aligned_prob is not None else None,
             "aligned_pair_flag": aligned_prob is not None and aligned_prob >= ALIGNED_PAIR_THRESHOLD,
+            "knn_agree_trio": bool(trio_agree),
+            "knn_trio_calibration_ratio": round(float(trio_ratio), 4),
             "strength_bin": this_bin,
             "kimarite_dist": json.dumps(kimarite_dist, ensure_ascii=False) if kimarite_dist else None,
             "payout_bucket_labels": json.dumps(payout_bucket_labels, ensure_ascii=False),

@@ -27,6 +27,8 @@ VALID_YEARS = 1
 STYLE_YEARS = 5
 SIMILAR_RACE_YEARS = 3
 STYLE_MIN_WINS = 30
+KNN_K = 500
+KNN_MIN_GROUP_N = 200  # 較正比率を信頼するための最低件数(一致/不一致それぞれ)
 
 BASE_FIELDS = [
     "全国勝率", "全国2率", "当地勝率", "当地2率", "モーター2率", "ボート2率",
@@ -123,6 +125,210 @@ def compute_trailing_year_stats(archive: pd.DataFrame) -> pd.DataFrame:
         df["1年該当コース複勝率"] = np.where(df["co_starts"] > 0, df["co_top2"] / df["co_starts"] * 100, np.nan)
 
     return df
+
+
+def build_wide_outcome_table(df: pd.DataFrame) -> pd.DataFrame:
+    """ロング形式(1行=1艇)のアーカイブを、近似100レース(KNN)モデル用のワイド形式
+    (date,jcd,r,勝率1..6,r1,r2,r3)に変換する。着順01/02/03の艇番をr1/r2/r3とする。
+    6艇分の全国勝率・上位3着順が全て揃っているレースだけを残す。
+    """
+    d = df.copy()
+    d["boat_num_num"] = pd.to_numeric(d["boat_num"], errors="coerce")
+    d["全国勝率_num"] = pd.to_numeric(d["全国勝率"], errors="coerce")
+    wide_rate = d.pivot_table(index=["date", "jcd", "r"], columns="boat_num_num", values="全国勝率_num", aggfunc="first")
+    wide_rate.columns = [f"勝率{int(c)}" for c in wide_rate.columns]
+    rate_cols = [f"勝率{i}" for i in range(1, 7)]
+    wide_rate = wide_rate.reindex(columns=rate_cols).dropna(subset=rate_cols)
+
+    finish = d[d["着順"].isin(["01", "02", "03"])][["date", "jcd", "r", "着順", "boat_num_num"]]
+    finish_wide = finish.pivot_table(index=["date", "jcd", "r"], columns="着順", values="boat_num_num", aggfunc="first")
+    finish_wide = finish_wide.rename(columns={"01": "r1", "02": "r2", "03": "r3"})
+    finish_wide = finish_wide.reindex(columns=["r1", "r2", "r3"]).dropna()
+
+    out = wide_rate.join(finish_wide, how="inner").reset_index()
+    out["jcd"] = out["jcd"].astype(str).str.zfill(2)
+    out["r"] = out["r"].astype(int)
+    for c in ["r1", "r2", "r3"]:
+        out[c] = out[c].astype(int)
+    return out
+
+
+def train_knn_and_calibration(
+    df: pd.DataFrame, model: lgb.Booster, medians: dict,
+    train_start, train_end, valid_start, valid_end,
+) -> tuple:
+    """近似100レース(KNN)モデルを学習し、強さモデルとの「一致/不一致」で
+    的中確率の較正比率(calibration ratio)を計算する。
+
+    2026年7月の検証(2024/2025/2026年6月までの3年分、それぞれ他の期間で
+    比率を決めて未知の1年でテストする方式)で、強さモデルの本命(2連複/3連複)予想が
+    KNNモデルの本命予想と一致した場合は的中率が有意に高く(3連複+5.6〜5.9pt、
+    2連複+8.6〜9.1pt、3年間ほぼ一定)、この一致状況で確率を較正するとBrierスコアが
+    3年とも一貫して改善することを確認済み。詳細はこのコミットの説明を参照。
+    """
+    from itertools import combinations
+
+    from boat_model.models import ApproxRaceKNNModel
+    from boat_model.features import add_basic_features, TRIFECTA_PERMUTATIONS
+    from boat_model.pl_probabilities import pair_probabilities, trifecta_probabilities
+
+    pairs15 = list(combinations(range(1, 7), 2))
+    pair_index = {p: i for i, p in enumerate(pairs15)}
+    trios20 = list(combinations(range(1, 7), 3))
+    trio_index20 = {t: i for i, t in enumerate(trios20)}
+    perm_to_pair20 = np.array([pair_index[tuple(sorted(p[:2]))] for p in TRIFECTA_PERMUTATIONS])
+    perm_to_trio20 = np.array([trio_index20[tuple(sorted(p[:3]))] for p in TRIFECTA_PERMUTATIONS])
+
+    wide = build_wide_outcome_table(df)
+    wide_train = wide[(wide["date"] >= str(train_start.date())) & (wide["date"] < str(train_end.date()))]
+    wide_valid = wide[(wide["date"] >= str(valid_start.date())) & (wide["date"] < str(valid_end.date()))]
+    print(f"KNN較正: 学習プール{len(wide_train)}レース, 較正検証(強さモデルにとってもvalid期間){len(wide_valid)}レース")
+
+    # 較正比率を出すためだけの、train期間のみで学習したKNN(valid期間を漏らさない)
+    knn_calib = ApproxRaceKNNModel(k=KNN_K, weighted=False).fit(wide_train)
+
+    # --- valid期間の強さモデル自身のtop pair/trioを計算(全レース一括のベクトル演算) ---
+    feature_cols = BASE_FIELDS + ["級別num", "boat_num", "jcd_cat"]
+    v = df[(df["date_dt"] >= valid_start) & (df["date_dt"] < valid_end)].copy()
+    v["jcd_cat"] = v["jcd"].astype("category")
+    v["級別num"] = v["級別"].map(CLASS_MAP).fillna(0)
+    for f in BASE_FIELDS:
+        v[f] = pd.to_numeric(v[f], errors="coerce").fillna(medians[f])
+    v["boat_num"] = pd.to_numeric(v["boat_num"], errors="coerce")
+    v["race_id"] = v["date"] + "_" + v["jcd"] + "_" + v["r"]
+    v["score"] = model.predict(v[feature_cols])
+    v = v.sort_values(["race_id", "boat_num"])
+    race_sizes = v.groupby("race_id", sort=False).size()
+    v = v[v["race_id"].isin(race_sizes[race_sizes == 6].index)]
+
+    race_ids = v["race_id"].drop_duplicates().to_numpy()
+    score_mat = v["score"].to_numpy().reshape(-1, 6)
+    theta_mat = np.exp(score_mat - score_mat.max(axis=1, keepdims=True))
+    quinella_probs, _ = pair_probabilities(theta_mat)
+    tri_probs = trifecta_probabilities(theta_mat)
+    n_races = len(race_ids)
+    trio_probs = np.zeros((n_races, 20))
+    for k in range(120):
+        trio_probs[:, perm_to_trio20[k]] += tri_probs[:, k]
+    meta = v.drop_duplicates(subset="race_id")[["race_id", "date", "jcd", "r"]].reset_index(drop=True)
+    new_tbl = pd.DataFrame({
+        "race_id": race_ids,
+        "new_top_pair_idx": np.argmax(quinella_probs, axis=1),
+        "new_top_pair_prob": quinella_probs.max(axis=1),
+        "new_top_trio_idx": np.argmax(trio_probs, axis=1),
+        "new_top_trio_prob": trio_probs.max(axis=1),
+    }).merge(meta, on="race_id", how="left")
+
+    # --- 同じvalid期間でKNNのtop pair/trioを計算 ---
+    valid_feat = wide_valid.copy()
+    valid_feat["race_id"] = valid_feat["date"] + "_" + valid_feat["jcd"] + "_" + valid_feat["r"].astype(str)
+
+    eval_df = add_basic_features(valid_feat)
+    knn_proba = knn_calib.predict_proba(eval_df)
+    n = len(eval_df)
+    knn_pair = np.zeros((n, 15))
+    knn_trio = np.zeros((n, 20))
+    for k in range(120):
+        knn_pair[:, perm_to_pair20[k]] += knn_proba[:, k]
+        knn_trio[:, perm_to_trio20[k]] += knn_proba[:, k]
+    knn_tbl = pd.DataFrame({
+        "race_id": valid_feat["race_id"].to_numpy(),
+        "knn_top_pair_idx": np.argmax(knn_pair, axis=1),
+        "knn_top_trio_idx": np.argmax(knn_trio, axis=1),
+    })
+
+    # --- 実際の着順(r1,r2,r3)からactual pair/trio ---
+    actual = wide_valid.copy()
+    actual["race_id"] = actual["date"] + "_" + actual["jcd"] + "_" + actual["r"].astype(str)
+    actual_pair_idx = actual.apply(lambda r: pair_index[tuple(sorted((int(r["r1"]), int(r["r2"]))))], axis=1)
+    actual_trio_idx = actual.apply(lambda r: trio_index20[tuple(sorted((int(r["r1"]), int(r["r2"]), int(r["r3"]))))], axis=1)
+    actual_tbl = pd.DataFrame({
+        "race_id": actual["race_id"].to_numpy(), "actual_pair_idx": actual_pair_idx.to_numpy(),
+        "actual_trio_idx": actual_trio_idx.to_numpy(),
+    })
+
+    merged = new_tbl.merge(knn_tbl, on="race_id", how="inner").merge(actual_tbl, on="race_id", how="inner")
+    merged["pair_agree"] = merged["new_top_pair_idx"] == merged["knn_top_pair_idx"]
+    merged["trio_agree"] = merged["new_top_trio_idx"] == merged["knn_top_trio_idx"]
+    merged["pair_hit"] = merged["new_top_pair_idx"] == merged["actual_pair_idx"]
+    merged["trio_hit"] = merged["new_top_trio_idx"] == merged["actual_trio_idx"]
+    print(f"KNN較正: 較正検証で使えたレース数 {len(merged)}")
+
+    def calib_ratio(mask_col, hit_col, prob_col, agree_val):
+        g = merged[merged[mask_col] == agree_val]
+        if len(g) < KNN_MIN_GROUP_N or g[prob_col].mean() <= 0:
+            return 1.0
+        return float(g[hit_col].mean() / g[prob_col].mean())
+
+    for grp_val, label in [(True, "match"), (False, "mismatch")]:
+        g = merged[merged["trio_agree"] == grp_val]
+        print(f"  [診断] trio {label}: n={len(g)}, "
+              f"mean_pred_prob={g['new_top_trio_prob'].mean():.4f}, actual_hit_rate={g['trio_hit'].mean():.4f}")
+    import os
+    if os.environ.get("KNN_CALIB_DEBUG_DIR"):
+        merged.to_pickle(Path(os.environ["KNN_CALIB_DEBUG_DIR"]) / "calib_merged_debug.pkl")
+
+    # 較正比率はvalid期間(直近1年)だけから計算するため、月ごとの学習結果次第で
+    # ノイズが乗る。2026年7月時点の実データで実際に確認された例: 一致時の実際の
+    # 的中率は不一致時より+5.3pt高く(2024/2025/2026年の3年分の検証と一貫して
+    # 同水準)効果自体は本物だが、モデル自身の予測確率も一致時に平均して高めに
+    # 出る(0.321 vs 0.253)ため、「実的中率÷予測確率」の比率にすると相殺されて
+    # ほぼ差が消え、この月はたまたま僅かに逆転していた(match比率0.8139 <
+    # mismatch比率0.8239)。
+    #
+    # 1回のvalid期間だけを見て判断すると、こうしたモデルの再学習ごとの揺れに
+    # 引きずられて逆方向の補正を本番に出しかねない。2024/2025/2026年6月の
+    # 3年分の独立した検証(各年、他の2年で比率を決めて未知の年でテストする
+    # 方式)で得られた比率は一致・不一致で常に明確な差があり安定していたため、
+    # これを事前分布(prior)とし、当月の実測比率とブレンド(事前分布の重みを
+    # 高めにして、1か月分のノイズで大きく振られないようにする)して使う。
+    PRIOR_TRIO_MATCH = 0.819      # 2024:0.8095 / 2025:0.8126 / 2026H1:0.8337 の平均
+    PRIOR_TRIO_MISMATCH = 0.766   # 2024:0.7610 / 2025:0.7548 / 2026H1:0.7828 の平均
+    PRIOR_PAIR_MATCH = 0.955      # walk-forward検証(他2年で学習)の3fold平均
+    PRIOR_PAIR_MISMATCH = 0.859
+    PRIOR_WEIGHT = 0.7
+    MIN_RATIO_GAP = 0.02
+
+    def blend_ratio_pair(match_raw, mismatch_raw, prior_match, prior_mismatch, label):
+        match_blend = PRIOR_WEIGHT * prior_match + (1 - PRIOR_WEIGHT) * match_raw
+        mismatch_blend = PRIOR_WEIGHT * prior_mismatch + (1 - PRIOR_WEIGHT) * mismatch_raw
+        print(f"  [較正] {label}: 今月実測 match={match_raw:.4f}/mismatch={mismatch_raw:.4f} → "
+              f"事前分布とブレンド後 match={match_blend:.4f}/mismatch={mismatch_blend:.4f}")
+        if match_blend - mismatch_blend < MIN_RATIO_GAP:
+            print(f"  [較正セーフガード] {label}: ブレンド後も差が僅少なため、今月は補正なし(1.0/1.0)にフォールバック")
+            return 1.0, 1.0
+        return match_blend, mismatch_blend
+
+    trio_match_raw = calib_ratio("trio_agree", "trio_hit", "new_top_trio_prob", True)
+    trio_mismatch_raw = calib_ratio("trio_agree", "trio_hit", "new_top_trio_prob", False)
+    pair_match_raw = calib_ratio("pair_agree", "pair_hit", "new_top_pair_prob", True)
+    pair_mismatch_raw = calib_ratio("pair_agree", "pair_hit", "new_top_pair_prob", False)
+    trio_match_ratio, trio_mismatch_ratio = blend_ratio_pair(
+        trio_match_raw, trio_mismatch_raw, PRIOR_TRIO_MATCH, PRIOR_TRIO_MISMATCH, "trio(3連複)")
+    pair_match_ratio, pair_mismatch_ratio = blend_ratio_pair(
+        pair_match_raw, pair_mismatch_raw, PRIOR_PAIR_MATCH, PRIOR_PAIR_MISMATCH, "pair(2連複)")
+
+    calibration = {
+        "trio_match_ratio": round(trio_match_ratio, 4),
+        "trio_mismatch_ratio": round(trio_mismatch_ratio, 4),
+        "pair_match_ratio": round(pair_match_ratio, 4),
+        "pair_mismatch_ratio": round(pair_mismatch_ratio, 4),
+        "trio_match_ratio_raw": round(trio_match_raw, 4),
+        "trio_mismatch_ratio_raw": round(trio_mismatch_raw, 4),
+        "pair_match_ratio_raw": round(pair_match_raw, 4),
+        "pair_mismatch_ratio_raw": round(pair_mismatch_raw, 4),
+        "n_valid_races": int(len(merged)),
+        "trio_match_n": int(merged["trio_agree"].sum()),
+        "pair_match_n": int(merged["pair_agree"].sum()),
+    }
+    print("KNN較正比率:", calibration)
+
+    # --- 本番用KNN: train+valid(手に入る最新まで)で学習し直す ---
+    wide_prod = wide[(wide["date"] >= str(train_start.date())) & (wide["date"] < str(valid_end.date()))]
+    print(f"KNN本番モデル学習プール: {len(wide_prod)}レース")
+    knn_prod = ApproxRaceKNNModel(k=KNN_K, weighted=False).fit(wide_prod)
+
+    return knn_prod, calibration
 
 
 def train_strength_model(df: pd.DataFrame) -> tuple[lgb.Booster, dict]:
@@ -268,6 +474,21 @@ def main() -> None:
     model.save_model(str(ARTIFACTS_DIR / "strength_model.txt"))
     pd.to_pickle(base_field_medians, ARTIFACTS_DIR / "base_field_medians.pkl")
 
+    print("\n=== 近似100レース(KNN)モデルを再学習・一致較正比率を再計算 ===")
+    max_date = df["date_dt"].max()
+    valid_end = max_date + pd.Timedelta(days=1)
+    valid_start = valid_end - pd.DateOffset(years=VALID_YEARS)
+    train_end = valid_start
+    train_start = train_end - pd.DateOffset(years=TRAIN_YEARS)
+    knn_model, calibration = train_knn_and_calibration(
+        df, model, base_field_medians, train_start, train_end, valid_start, valid_end)
+    import pickle
+    with open(ARTIFACTS_DIR / "knn_model.pkl", "wb") as f:
+        pickle.dump(knn_model, f)
+    import json
+    with open(ARTIFACTS_DIR / "knn_calibration_ratios.json", "w", encoding="utf-8") as f:
+        json.dump(calibration, f, ensure_ascii=False, indent=2)
+
     print("\n=== 選手スタイル(5年)を再構築 ===")
     style = build_racer_style(df)
     style.to_pickle(ARTIFACTS_DIR / "racer_style_5y.pkl")
@@ -286,6 +507,7 @@ def main() -> None:
     print(f"グループ数: {len(similar)}")
 
     print("\n完了。artifacts/scenario/ に strength_model.txt, base_field_medians.pkl, "
+          "knn_model.pkl, knn_calibration_ratios.json, "
           "racer_style_5y.pkl, subplace_profile.pkl, similar_race_3y.pkl, "
           "payout_overall_edges_3y.pkl を保存しました。")
 
