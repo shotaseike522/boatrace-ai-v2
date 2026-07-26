@@ -125,14 +125,12 @@ def compute_trailing_year_stats(archive: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def train_strength_model(df: pd.DataFrame) -> lgb.Booster:
+def train_strength_model(df: pd.DataFrame) -> tuple[lgb.Booster, dict]:
     df = df.copy()
     df["jcd_cat"] = df["jcd"].astype("category")
     df["級別num"] = df["級別"].map(CLASS_MAP).fillna(0)
     for f in BASE_FIELDS:
         df[f] = pd.to_numeric(df[f], errors="coerce")
-    for f in BASE_FIELDS:
-        df[f] = df[f].fillna(df[f].median())
 
     finish_map = {"01": 5, "02": 4, "03": 3, "04": 2, "05": 1, "06": 0}
     df["relevance"] = df["着順"].map(finish_map).fillna(0)
@@ -144,10 +142,18 @@ def train_strength_model(df: pd.DataFrame) -> lgb.Booster:
     train_end = valid_start
     train_start = train_end - pd.DateOffset(years=TRAIN_YEARS)
 
-    train_df = df[(df["date_dt"] >= train_start) & (df["date_dt"] < train_end)]
-    valid_df = df[(df["date_dt"] >= valid_start) & (df["date_dt"] < valid_end)]
+    train_df = df[(df["date_dt"] >= train_start) & (df["date_dt"] < train_end)].copy()
+    valid_df = df[(df["date_dt"] >= valid_start) & (df["date_dt"] < valid_end)].copy()
     print(f"強さモデル学習期間: {train_start.date()} 〜 {train_end.date()} ({train_df['race_id'].nunique()}レース)")
     print(f"valid期間: {valid_start.date()} 〜 {valid_end.date()} ({valid_df['race_id'].nunique()}レース)")
+
+    # 欠損値の穴埋めは学習期間(train_df)のみの中央値を使う(valid期間や将来分を
+    # 含めた全体の中央値を使うとリークになる)。この中央値は本番の日次予測
+    # (run_scenario_predictions.py)でも同じ基準を使うようartifactsに保存する。
+    medians = {f: float(train_df[f].median()) for f in BASE_FIELDS}
+    for f in BASE_FIELDS:
+        train_df[f] = train_df[f].fillna(medians[f])
+        valid_df[f] = valid_df[f].fillna(medians[f])
 
     feature_cols = BASE_FIELDS + ["級別num", "boat_num", "jcd_cat"]
 
@@ -165,7 +171,7 @@ def train_strength_model(df: pd.DataFrame) -> lgb.Booster:
     model = lgb.train(params, train_set, num_boost_round=2000, valid_sets=[valid_set], valid_names=["valid"],
                        callbacks=[lgb.early_stopping(stopping_rounds=50), lgb.log_evaluation(period=50)])
     print("best_iteration:", model.best_iteration)
-    return model
+    return model, medians
 
 
 def build_racer_style(df: pd.DataFrame) -> pd.DataFrame:
@@ -257,9 +263,10 @@ def main() -> None:
     df = compute_trailing_year_stats(archive)
 
     print("\n=== 強さモデル(3年+jcd)を再学習 ===")
-    model = train_strength_model(df)
+    model, base_field_medians = train_strength_model(df)
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     model.save_model(str(ARTIFACTS_DIR / "strength_model.txt"))
+    pd.to_pickle(base_field_medians, ARTIFACTS_DIR / "base_field_medians.pkl")
 
     print("\n=== 選手スタイル(5年)を再構築 ===")
     style = build_racer_style(df)
@@ -278,8 +285,9 @@ def main() -> None:
     pd.to_pickle(overall_edges, ARTIFACTS_DIR / "payout_overall_edges_3y.pkl")
     print(f"グループ数: {len(similar)}")
 
-    print("\n完了。artifacts/scenario/ に strength_model.txt, racer_style_5y.pkl, "
-          "subplace_profile.pkl, similar_race_3y.pkl, payout_overall_edges_3y.pkl を保存しました。")
+    print("\n完了。artifacts/scenario/ に strength_model.txt, base_field_medians.pkl, "
+          "racer_style_5y.pkl, subplace_profile.pkl, similar_race_3y.pkl, "
+          "payout_overall_edges_3y.pkl を保存しました。")
 
 
 if __name__ == "__main__":

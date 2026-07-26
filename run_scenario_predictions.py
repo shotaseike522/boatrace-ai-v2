@@ -52,10 +52,15 @@ def load_today_features(races_csv: str) -> pd.DataFrame:
 
     races = pd.read_csv(races_csv, dtype={"jcd": str})
     archive = load_merged_archive()
-    hist = compute_trailing_year_stats(archive)
-    # 各登番の直近の1年複勝率等(その登番の最新レコード)を当日データに結合する
-    latest = hist.sort_values("date_dt").drop_duplicates(subset=["登番"], keep="last")
-    latest = latest.set_index("登番")[["1年出走数", "1年複勝率", "1年該当コース出走数", "1年該当コース複勝率"]]
+    hist = compute_trailing_year_stats(archive).sort_values("date_dt")
+    # 全体成績(1年出走数/1年複勝率)は登番の最新レコードから、該当コース成績
+    # (1年該当コース出走数/1年該当コース複勝率)は(登番,boat_num)の最新レコードから
+    # 取る。登番だけで最新1件に絞ると、その選手が直近に走った別コースの成績が
+    # 今日のboat_numに紐づいてしまうため分けている。
+    latest_overall = hist.drop_duplicates(subset=["登番"], keep="last").set_index("登番")[
+        ["1年出走数", "1年複勝率"]]
+    latest_by_course = hist.drop_duplicates(subset=["登番", "boat_num"], keep="last").set_index(
+        ["登番", "boat_num"])[["1年該当コース出走数", "1年該当コース複勝率"]]
 
     rows = []
     for _, race in races.iterrows():
@@ -69,23 +74,33 @@ def load_today_features(races_csv: str) -> pd.DataFrame:
                 "モーター2率": race.get(f"モーター2率{w}"), "ボート2率": race.get(f"ボート2率{w}"),
                 "年齢": race.get(f"年齢{w}"), "体重": race.get(f"体重{w}"),
             }
-            if toban in latest.index:
-                for c in ["1年出走数", "1年複勝率", "1年該当コース出走数", "1年該当コース複勝率"]:
-                    row[c] = latest.loc[toban, c]
+            if toban in latest_overall.index:
+                row["1年出走数"] = latest_overall.loc[toban, "1年出走数"]
+                row["1年複勝率"] = latest_overall.loc[toban, "1年複勝率"]
             else:
-                for c in ["1年出走数", "1年複勝率", "1年該当コース出走数", "1年該当コース複勝率"]:
-                    row[c] = np.nan
+                row["1年出走数"] = np.nan
+                row["1年複勝率"] = np.nan
+            course_key = (toban, str(w))
+            if course_key in latest_by_course.index:
+                row["1年該当コース出走数"] = latest_by_course.loc[course_key, "1年該当コース出走数"]
+                row["1年該当コース複勝率"] = latest_by_course.loc[course_key, "1年該当コース複勝率"]
+            else:
+                row["1年該当コース出走数"] = np.nan
+                row["1年該当コース複勝率"] = np.nan
             rows.append(row)
     return pd.DataFrame(rows)
 
 
-def score_races(features: pd.DataFrame, model: lgb.Booster) -> pd.DataFrame:
+def score_races(features: pd.DataFrame, model: lgb.Booster, medians: dict) -> pd.DataFrame:
     df = features.copy()
     df["jcd_cat"] = df["jcd"].astype("category")
     df["級別num"] = df["級別"].map(CLASS_MAP).fillna(0)
     for f in BASE_FIELDS:
         df[f] = pd.to_numeric(df[f], errors="coerce")
-        df[f] = df[f].fillna(df[f].median())
+        # 欠損値は当日の少数レースの中央値ではなく、学習時(retrain_monthly.py)と
+        # 同じ基準(直近3年学習データの中央値)で埋める。基準がズレると
+        # 学習時と本番で同じ欠損値が別の値に化けてしまう(train-serve skew)。
+        df[f] = df[f].fillna(medians[f])
     feature_cols = BASE_FIELDS + ["級別num", "boat_num", "jcd_cat"]
     df["score"] = model.predict(df[feature_cols])
     race_key = df["date"].astype(str) + "_" + df["jcd"].astype(str) + "_" + df["r"].astype(str)
@@ -110,7 +125,8 @@ def main() -> None:
 
     print("強さモデル読み込み・スコアリング中...")
     model = lgb.Booster(model_file=str(ARTIFACTS_DIR / "strength_model.txt"))
-    scored = score_races(features, model)
+    medians = pd.read_pickle(ARTIFACTS_DIR / "base_field_medians.pkl")
+    scored = score_races(features, model, medians)
 
     print("選手スタイル・非1着時プロファイル・類似レース表読み込み中...")
     style = sl.load_racer_style()

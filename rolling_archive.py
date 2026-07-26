@@ -20,6 +20,18 @@ import pytz
 ARCHIVE_PATH = "data/site_archive_rolling3y.csv"
 TRIM_YEARS = 3
 
+
+def _to_iso_date(date_val) -> str:
+    """daily_prep.pyはdateを"YYYYMMDD"形式(mbrace.or.jpのファイル名慣習)で渡すが、
+    アーカイブのシードデータ(build_archive_seed.py由来)は"YYYY-MM-DD"形式のため、
+    混在するとpd.to_datetime()が本日分の行だけNaTにしてしまう(trim_archive()の
+    文字列比較も壊れる)。書き込み時に必ずISO形式へ正規化して統一する。
+    """
+    s = str(date_val).strip()
+    if len(s) == 8 and s.isdigit():
+        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
+    return s
+
 ENTRY_COLS = [
     "登番", "級別", "年齢", "体重",
     "全国勝率", "全国2率", "当地勝率", "当地2率",
@@ -60,7 +72,7 @@ def append_entries_to_archive(races_csv_path: str | None) -> None:
 
     new_rows = []
     for _, row in races.iterrows():
-        date_s, jcd_s, r_s = str(row["date"]), str(row["jcd"]), str(row["r"])
+        date_s, jcd_s, r_s = _to_iso_date(row["date"]), str(row["jcd"]), str(row["r"])
         if (date_s, jcd_s, r_s) in existing_keys:
             continue
         for w in range(1, 7):
@@ -109,7 +121,7 @@ def update_archive_with_results(results_csv_path: str | None) -> None:
     updated = 0
 
     for _, row in results.iterrows():
-        date_s, jcd_s, r_s = str(row["date"]), str(row["jcd"]), str(row["r"])
+        date_s, jcd_s, r_s = _to_iso_date(row["date"]), str(row["jcd"]), str(row["r"])
         for w in range(1, 7):
             key = (date_s, jcd_s, r_s, str(w))
             if key not in archive.index:
@@ -142,7 +154,7 @@ def trim_archive() -> None:
     if archive.empty:
         return
     jst = pytz.timezone("Asia/Tokyo")
-    cutoff = (datetime.now(jst) - pd.DateOffset(years=TRIM_YEARS)).strftime("%Y%m%d")
+    cutoff = (datetime.now(jst) - pd.DateOffset(years=TRIM_YEARS)).strftime("%Y-%m-%d")
     before = len(archive)
     archive = archive[archive["date"].astype(str) >= cutoff]
     after = len(archive)

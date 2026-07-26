@@ -115,6 +115,23 @@ def inject_style() -> None:
         .ai-card div {
             color: inherit;
         }
+        /* st.container(border=True, key=...)版のカード(内部にst.button等の
+           ネイティブウィジェットを置く場所で使用。st.markdownのdiv開閉タグを
+           分割する方式だと、st.markdown呼び出し単位でHTMLが個別にパースされる
+           ためウィジェットを実際には囲えず、カードが空枠になってしまう不具合が
+           あったため、Streamlitネイティブの枠付きコンテナに置き換えた。
+           key=を指定すると Streamlit が st-key-<key> という安定したCSSクラスを
+           付与してくれるため、それを使って個別にスタイルを当てる) */
+        .st-key-ai-card-pickup, .st-key-ai-card-venue, .st-key-ai-card-race {
+            background: var(--surface) !important;
+            border: 1px solid var(--line) !important;
+            border-radius: 16px !important;
+            padding: 16px !important;
+            margin-bottom: 14px;
+        }
+        .st-key-ai-card-pickup *, .st-key-ai-card-venue *, .st-key-ai-card-race * {
+            color: inherit;
+        }
         .ai-card-title {
             font-size: 13px;
             font-weight: 700;
@@ -173,7 +190,12 @@ def inject_style() -> None:
             border-color: var(--primary);
             color: var(--primary);
         }
-        .venue-btn-active button {
+        /* 選択中の会場/レース/おすすめレースボタンのハイライト。旧実装は
+           <div class="venue-btn-active">をst.markdownで開き、別のst.button呼び出しを
+           挟んで別のst.markdownで閉じる方式だったが、Streamlitはst.markdown呼び出し
+           ごとにHTMLを個別にパースするため実際にはボタンを囲えず、機能していなかった。
+           st.button(type="primary")というネイティブAPIに置き換えた。 */
+        div[data-testid="stButton"] button[kind="primary"] {
             background: var(--primary) !important;
             border-color: var(--primary) !important;
             color: white !important;
@@ -223,14 +245,11 @@ def render_venue_picker(df: pd.DataFrame) -> None:
             venue_name = VENUES_MAP.get(jcd, jcd)
             is_active = st.session_state["target_jcd"] == jcd
             with cols[i]:
-                if is_active:
-                    st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
-                if st.button(f"{jcd}\n{venue_name}", key=f"venue_{jcd}", use_container_width=True):
+                btn_type = "primary" if is_active else "secondary"
+                if st.button(f"{jcd}\n{venue_name}", key=f"venue_{jcd}", use_container_width=True, type=btn_type):
                     st.session_state["target_jcd"] = jcd
                     st.session_state["target_rno"] = None
                     st.rerun()
-                if is_active:
-                    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_race_picker(df: pd.DataFrame) -> None:
@@ -253,13 +272,10 @@ def render_race_picker(df: pd.DataFrame) -> None:
                     )
                     continue
                 is_active = st.session_state["target_rno"] == rno
-                if is_active:
-                    st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
-                if st.button(str(rno), key=f"race_{rno}", use_container_width=True):
+                btn_type = "primary" if is_active else "secondary"
+                if st.button(str(rno), key=f"race_{rno}", use_container_width=True, type=btn_type):
                     st.session_state["target_rno"] = rno
                     st.rerun()
-                if is_active:
-                    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_current_selection() -> None:
@@ -484,15 +500,12 @@ def render_pickup_races(df: pd.DataFrame) -> None:
                 and st.session_state["target_rno"] == rno
             )
             with cols[i]:
-                if is_active:
-                    st.markdown('<div class="venue-btn-active">', unsafe_allow_html=True)
                 label = f"{venue_name} {rno}R\n{pair} {prob_pct:.0f}%"
-                if st.button(label, key=f"pickup_{jcd}_{rno}", use_container_width=True):
+                btn_type = "primary" if is_active else "secondary"
+                if st.button(label, key=f"pickup_{jcd}_{rno}", use_container_width=True, type=btn_type):
                     st.session_state["target_jcd"] = jcd
                     st.session_state["target_rno"] = rno
                     st.rerun()
-                if is_active:
-                    st.markdown("</div>", unsafe_allow_html=True)
 
 
 def main() -> None:
@@ -521,21 +534,15 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    with st.container():
-        st.markdown('<div class="ai-card">', unsafe_allow_html=True)
+    with st.container(border=True, key="ai-card-pickup"):
         render_pickup_races(df)
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    with st.container():
-        st.markdown('<div class="ai-card">', unsafe_allow_html=True)
+    with st.container(border=True, key="ai-card-venue"):
         render_venue_picker(df)
-        st.markdown("</div>", unsafe_allow_html=True)
 
     if st.session_state["target_jcd"]:
-        with st.container():
-            st.markdown('<div class="ai-card">', unsafe_allow_html=True)
+        with st.container(border=True, key="ai-card-race"):
             render_race_picker(df)
-            st.markdown("</div>", unsafe_allow_html=True)
 
     render_current_selection()
 
