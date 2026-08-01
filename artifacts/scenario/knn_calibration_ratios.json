@@ -1,13 +1,13 @@
 {
-  "trio_match_ratio": 0.8175,
-  "trio_mismatch_ratio": 0.7834,
-  "pair_match_ratio": 0.9534,
-  "pair_mismatch_ratio": 0.8632,
-  "trio_match_ratio_raw": 0.8139,
-  "trio_mismatch_ratio_raw": 0.8239,
-  "pair_match_ratio_raw": 0.9496,
-  "pair_mismatch_ratio_raw": 0.8731,
-  "n_valid_races": 50638,
-  "trio_match_n": 32057,
-  "pair_match_n": 34056
+  "trio_match_ratio": 0.8218,
+  "trio_mismatch_ratio": 0.7866,
+  "pair_match_ratio": 0.9582,
+  "pair_mismatch_ratio": 0.8688,
+  "trio_match_ratio_raw": 0.8284,
+  "trio_mismatch_ratio_raw": 0.8346,
+  "pair_match_ratio_raw": 0.9657,
+  "pair_mismatch_ratio_raw": 0.8916,
+  "n_valid_races": 49689,
+  "trio_match_n": 31817,
+  "pair_match_n": 33763
 }
