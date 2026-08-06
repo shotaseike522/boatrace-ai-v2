@@ -1,5 +1,5 @@
 """既存のniren-wide-experimentアーカイブ(2005-2026、ワイド形式)から、直近3年分
-(2023/7〜2026/6)を site_archive_rolling3y.csv と同じロング形式(1艇1行)に
+(2023/7〜2026/6)を site_archive_rolling3y.parquet と同じロング形式(1艇1行)に
 変換し、初期シードとして書き出す。
 
 これが無いと、サイト自前のローリングアーカイブは今日(スクレイピング開始日)から
@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 SOURCE_ARCHIVE = Path(r"C:\Users\trium\OneDrive\Desktop\boat\lzh_archive\boatrace_bk_dataset_2005-2026_with_1y.csv")
-OUT_PATH = Path(__file__).resolve().parent / "data" / "site_archive_rolling3y.csv"
+OUT_PATH = Path(__file__).resolve().parent / "data" / "site_archive_rolling3y.parquet"
 SEED_START = "2023-07-01"
 
 # rolling_archive.ALL_COLSと対応させる
@@ -77,7 +77,9 @@ def main() -> None:
     # (シードは2026-06-30までなので日付が重複することは通常ないが、念のため
     # date+jcd+r+boat_numで重複排除し、後勝ち=既存データ優先にする)
     if OUT_PATH.exists():
-        existing = pd.read_csv(OUT_PATH, dtype=str)
+        existing = pd.read_parquet(OUT_PATH)
+        for c in existing.columns:
+            existing[c] = existing[c].astype(str)
         combined = pd.concat([long_df, existing], ignore_index=True)
         combined = combined.drop_duplicates(subset=["date", "jcd", "r", "boat_num"], keep="last")
     else:
@@ -85,7 +87,7 @@ def main() -> None:
 
     combined = combined.sort_values(["date", "jcd", "r", "boat_num"]).reset_index(drop=True)
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    combined.to_csv(OUT_PATH, index=False, encoding="utf-8-sig")
+    combined.to_parquet(OUT_PATH, index=False, compression="snappy")
     print(f"完了: {len(combined)}行 x {len(combined.columns)}列 を書き出しました: {OUT_PATH}")
 
 

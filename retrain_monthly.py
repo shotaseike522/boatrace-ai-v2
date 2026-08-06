@@ -1,4 +1,4 @@
-"""月次再学習: サイト自前のローリングアーカイブ(data/site_archive_rolling3y.csv)
+"""月次再学習: サイト自前のローリングアーカイブ(data/site_archive_rolling3y.parquet)
 から、強さモデル(3年+jcd)・選手スタイル(5年)・類似レース表(3年)を再構築する。
 
 boatrace-niren-wide-experimentフォルダで検証済みの手法をそのまま踏襲:
@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
-ARCHIVE_PATH = DATA_DIR / "site_archive_rolling3y.csv"
-KIMARITE_SEED_PATH = DATA_DIR / "kimarite_payout_seed_pre202607.csv"
+ARCHIVE_PATH = DATA_DIR / "site_archive_rolling3y.parquet"
+KIMARITE_SEED_PATH = DATA_DIR / "kimarite_payout_seed_pre202607.parquet"
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "artifacts" / "scenario"
 
 TRAIN_YEARS = 3
@@ -59,11 +59,15 @@ def load_merged_archive() -> pd.DataFrame:
     アーカイブ自身の決まり手・払戻列がnull(=まだ結果反映されていない当日分、または
     シード期間で元々埋まっていない分)の行だけ、シード側の値で埋める。
     """
-    archive = pd.read_csv(ARCHIVE_PATH, dtype={"jcd": str, "r": str, "boat_num": str, "登番": str})
+    archive = pd.read_parquet(ARCHIVE_PATH)
+    for c in ["jcd", "r", "boat_num", "登番"]:
+        archive[c] = archive[c].astype(str)
     if not KIMARITE_SEED_PATH.exists():
         return archive
 
-    seed = pd.read_csv(KIMARITE_SEED_PATH, dtype={"jcd": str, "r": str})
+    seed = pd.read_parquet(KIMARITE_SEED_PATH)
+    for c in ["jcd", "r"]:
+        seed[c] = seed[c].astype(str)
     seed_cols = ["決まり手", "天候", "風向", "風速", "波高",
                  "3連単_払戻", "3連複_払戻", "2連単_払戻", "2連複_払戻"]
     seed_small = seed[["date", "jcd", "r"] + [c for c in seed_cols if c in seed.columns]].drop_duplicates(

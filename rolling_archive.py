@@ -1,4 +1,4 @@
-"""シナリオ予想モデル用のローリング3年アーカイブ(data/site_archive_rolling3y.csv)を
+"""シナリオ予想モデル用のローリング3年アーカイブ(data/site_archive_rolling3y.parquet)を
 管理する。1行=1艇×1レースの長形式で、以下の2段階で更新する:
 
   1. 当日の出走表取得後(entryフェーズ): 登番・級別・全国勝率・全国2率・当地勝率・
@@ -17,7 +17,7 @@ from datetime import datetime
 import pandas as pd
 import pytz
 
-ARCHIVE_PATH = "data/site_archive_rolling3y.csv"
+ARCHIVE_PATH = "data/site_archive_rolling3y.parquet"
 TRIM_YEARS = 3
 
 
@@ -46,14 +46,16 @@ ALL_COLS = ["date", "jcd", "r", "boat_num"] + ENTRY_COLS + RESULT_COLS
 
 def _load_archive() -> pd.DataFrame:
     if os.path.exists(ARCHIVE_PATH):
-        df = pd.read_csv(ARCHIVE_PATH, dtype={"date": str, "jcd": str, "r": str, "boat_num": str, "登番": str})
+        df = pd.read_parquet(ARCHIVE_PATH)
+        for c in ["date", "jcd", "r", "boat_num", "登番"]:
+            df[c] = df[c].astype(str)
         return df
     return pd.DataFrame(columns=ALL_COLS)
 
 
 def _save_archive(df: pd.DataFrame) -> None:
     os.makedirs(os.path.dirname(ARCHIVE_PATH), exist_ok=True)
-    df.to_csv(ARCHIVE_PATH, index=False, encoding="utf-8-sig")
+    df.to_parquet(ARCHIVE_PATH, index=False, compression="snappy")
 
 
 def append_entries_to_archive(races_csv_path: str | None) -> None:

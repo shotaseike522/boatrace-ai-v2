@@ -193,7 +193,7 @@ def fetch_results_and_archive(session):
     全6艇のST・主要payout種別(単勝を除く2連単/2連複/3連単/3連複)がまとめて
     取得できる。ここでの出力(outputs/results_YYYYMMDD.csv)は
     rolling_archive.update_archive_with_results() が読み込み、ローリング3年
-    アーカイブ(data/site_archive_rolling3y.csv)に反映する。
+    アーカイブ(data/site_archive_rolling3y.parquet)に反映する。
     sessionパラメータは呼び出し互換のために残しているが使用しない。
     """
     import tempfile

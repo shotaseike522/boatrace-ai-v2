@@ -41,5 +41,5 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add artifacts/scenario/
           git commit -m "🤖 月次再学習: 強さモデル・選手スタイル・類似レース表 ($(date -u +'%Y-%m-%d %H:%M UTC'))" || echo "変更なし（コミットをスキップ）"
-          git pull --rebase origin main
+          git pull --rebase --autostash origin main
           git push
