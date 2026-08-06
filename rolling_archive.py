@@ -55,6 +55,16 @@ def _load_archive() -> pd.DataFrame:
 
 def _save_archive(df: pd.DataFrame) -> None:
     os.makedirs(os.path.dirname(ARCHIVE_PATH), exist_ok=True)
+    df = df.copy()
+    # ENTRY_COLS/RESULT_COLSは出走表CSV・結果CSVという別々の読み込み元由来で、
+    # その日の欠損有無によって数値型になったり文字列型になったりdtypeが揺れうる。
+    # CSV運用時は書き込み時にどちらも文字列として直列化されるため型混在が
+    # 表面化しなかったが、Parquetは列の型を厳密にチェックするため、混在が
+    # あると書き込み時にArrowTypeErrorで落ちる(2026年8月に実際に発生)。
+    # 保存直前に必ず文字列型へ統一し、この種の混在を将来にわたって防ぐ。
+    for c in ENTRY_COLS + RESULT_COLS:
+        if c in df.columns:
+            df[c] = df[c].map(lambda v: None if pd.isna(v) else str(v))
     df.to_parquet(ARCHIVE_PATH, index=False, compression="snappy")
 
 
@@ -112,14 +122,14 @@ def update_archive_with_results(results_csv_path: str | None) -> None:
         print("⚠️ 結果データが無いため、アーカイブの更新をスキップします。")
         return
 
-    # 着順{w}列を文字列型で強制指定しないと、"01"~"06"のようなゼロ埋め文字列が
-    # 列全体で数値化できてしまい(欠損が無ければpandasはint64と推論する)、
-    # 整数1と既存データの文字列"01"が同じ着順列に混在してしまう。CSV運用時は
-    # 書き込み時にどちらも文字列化されるため表面化しなかったが、Parquetは
-    # 列の型を厳密にチェックするため、この型混在があると書き込み時に
-    # ArrowTypeErrorで落ちる(2026年8月に実際に発生)。
-    rank_dtypes = {f"着順{w}": str for w in range(1, 7)}
-    results = pd.read_csv(results_csv_path, dtype={"jcd": str, **rank_dtypes})
+    # 着順{w}・ST{w}列を文字列型で強制指定しないと、欠損の無い1日分のCSVでは
+    # pandasが"01"→1(ゼロ埋め消失)、"0.15"→0.15(float)のように数値化してしまい、
+    # 既存データの文字列表現と混在する。CSV運用時は書き込み時にどちらも文字列化
+    # されるため表面化しなかったが、Parquetは列の型を厳密にチェックするため、
+    # この型混在があると書き込み時にArrowTypeErrorで落ちる(2026年8月に実際に発生)。
+    force_str_cols = {f"着順{w}": str for w in range(1, 7)}
+    force_str_cols.update({f"ST{w}": str for w in range(1, 7)})
+    results = pd.read_csv(results_csv_path, dtype={"jcd": str, **force_str_cols})
     archive = _load_archive()
     if archive.empty:
         print("⚠️ アーカイブが空のため、結果の反映をスキップします。")
