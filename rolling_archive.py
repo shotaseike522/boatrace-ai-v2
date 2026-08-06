@@ -112,7 +112,14 @@ def update_archive_with_results(results_csv_path: str | None) -> None:
         print("⚠️ 結果データが無いため、アーカイブの更新をスキップします。")
         return
 
-    results = pd.read_csv(results_csv_path, dtype={"jcd": str})
+    # 着順{w}列を文字列型で強制指定しないと、"01"~"06"のようなゼロ埋め文字列が
+    # 列全体で数値化できてしまい(欠損が無ければpandasはint64と推論する)、
+    # 整数1と既存データの文字列"01"が同じ着順列に混在してしまう。CSV運用時は
+    # 書き込み時にどちらも文字列化されるため表面化しなかったが、Parquetは
+    # 列の型を厳密にチェックするため、この型混在があると書き込み時に
+    # ArrowTypeErrorで落ちる(2026年8月に実際に発生)。
+    rank_dtypes = {f"着順{w}": str for w in range(1, 7)}
+    results = pd.read_csv(results_csv_path, dtype={"jcd": str, **rank_dtypes})
     archive = _load_archive()
     if archive.empty:
         print("⚠️ アーカイブが空のため、結果の反映をスキップします。")
