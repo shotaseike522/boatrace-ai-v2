@@ -35,6 +35,21 @@ jobs:
       - name: 月次再学習（強さモデル3年+jcd・選手スタイル5年・類似レース表3年）
         run: python retrain_monthly.py
 
+      - name: リポジトリ容量チェック（.gitが肥大化していないか毎月確認）
+        run: |
+          GIT_SIZE_KB=$(du -sk .git | cut -f1)
+          GIT_SIZE_MB=$((GIT_SIZE_KB / 1024))
+          echo "現在の.gitサイズ: ${GIT_SIZE_MB}MB"
+          echo "LFS管理対象ファイル一覧（現在のHEAD時点）:"
+          git lfs ls-files -s
+          # .gitが1GBを超えたらGitHub Actionsの実行結果画面に警告を出す
+          # （2026年8月、日次で肥大化するアーカイブがStreamlit Cloudの起動を
+          # 遅くしていた問題への再発防止。閾値を超えたら履歴のクリーンアップ
+          # 要否を検討する）
+          if [ "$GIT_SIZE_MB" -gt 1024 ]; then
+            echo "::warning::.gitが${GIT_SIZE_MB}MBまで肥大化しています。Streamlit Cloudの起動が遅くなっている可能性があるため、git-lfs履歴のクリーンアップを検討してください。"
+          fi
+
       - name: 結果をコミット＆プッシュ
         run: |
           git config --global user.name "github-actions[bot]"
