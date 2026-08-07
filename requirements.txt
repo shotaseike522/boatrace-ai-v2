@@ -1,10 +1,7 @@
+# Streamlit Cloud(app.py)用。app.pyが実際にimportしているのは
+# pandas/pytz/streamlitのみ(numpyはpandasの依存として自動で入る)。
+# 日次バッチ・月次再学習(GitHub Actions)側のフル依存関係は
+# requirements-batch.txt を参照。
 pandas>=2.0
-numpy>=1.24
-pyarrow>=14.0
-scikit-learn>=1.3
-lightgbm>=4.0
-joblib>=1.3
 pytz>=2023.3
 streamlit>=1.32
-requests>=2.31
-beautifulsoup4>=4.12

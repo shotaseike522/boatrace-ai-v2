@@ -30,7 +30,7 @@ jobs:
       - name: 依存パッケージをインストール
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-batch.txt
 
       - name: 月次再学習（強さモデル3年+jcd・選手スタイル5年・類似レース表3年）
         run: python retrain_monthly.py

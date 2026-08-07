@@ -1,0 +1,15 @@
+# 日次バッチ・月次再学習(GitHub Actions)専用のフル依存関係ファイル。
+# daily_prep.py / retrain_monthly.py / run_scenario_predictions.py が
+# 必要とする全パッケージ。Streamlit Cloud(app.py)はこれらを使わないため、
+# サイト起動を軽くするために requirements.txt (app.py専用の軽量版)とは
+# 分離している。
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0
+scikit-learn>=1.3
+lightgbm>=4.0
+joblib>=1.3
+pytz>=2023.3
+streamlit>=1.32
+requests>=2.31
+beautifulsoup4>=4.12
