@@ -1,0 +1,14 @@
+# Streamlit Cloud(app.py)専用の軽量な依存関係ファイル。
+# app.pyが実際にimportしているのはpandas/pytz/streamlitのみ(numpyはpandasの
+# 依存として自動で入る)。lightgbm・scikit-learn・pyarrow・requests・
+# beautifulsoup4は日次バッチ(daily_prep.py/retrain_monthly.py/
+# run_scenario_predictions.py)側でしか使わず、GitHub Actions用の
+# requirements.txtにはそのまま残す。
+#
+# Streamlit Cloudの管理画面(Settings > Advanced settings > Python
+# dependencies file)でこのファイルのパスを指定すると、サイトの起動時に
+# 不要な重いパッケージ(特にpyarrow・lightgbm・scikit-learn)のインストールを
+# スキップでき、起動が速くなる可能性がある。
+pandas>=2.0
+pytz>=2023.3
+streamlit>=1.32
