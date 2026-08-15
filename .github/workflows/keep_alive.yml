@@ -29,9 +29,34 @@ jobs:
 
           URL = "https://boatrace-ai-v2-6avggkgmx7kjuajbe4yxqh.streamlit.app"
           # Streamlit Cloudのスリープ状態からの復帰は数十秒〜数分かかることがあるため、
-          # 複数回・十分な待ち時間を確保してリトライする。
-          MAX_ATTEMPTS = 4
-          WAIT_SECONDS = 20
+          # ページを1回開いたらリロードはせずにじっくり待つ(リロードで起床プロセスが
+          # 途中リセットされる可能性を避けるため)。休眠中は「Yes, get this app back up!」
+          # のような起こすボタンが表示される場合もあるので、見つけたらクリックする。
+          MAX_ATTEMPTS = 12
+          WAIT_SECONDS = 15
+
+          def find_app_frame(page):
+              for f in page.frames:
+                  if f != page.main_frame and "/~/+/" in f.url:
+                      return f
+              return None
+
+          def try_click_wake_button(page):
+              candidates = [
+                  "text=/get.*app.*back/i",
+                  "text=/wake/i",
+                  "button:has-text('Yes')",
+              ]
+              for sel in candidates:
+                  try:
+                      loc = page.locator(sel).first
+                      if loc.is_visible(timeout=1000):
+                          loc.click(timeout=3000)
+                          print(f"起こすボタンをクリックしました(セレクタ: {sel})")
+                          return True
+                  except Exception:
+                      continue
+              return False
 
           with sync_playwright() as p:
               browser = p.chromium.launch()
@@ -39,18 +64,14 @@ jobs:
               page.goto(URL, timeout=60000)
 
               woke_up = False
+              clicked = False
               for attempt in range(1, MAX_ATTEMPTS + 1):
                   time.sleep(WAIT_SECONDS)
-                  page.reload(timeout=60000)
-                  time.sleep(3)
-                  # 実際のアプリ本体は "/~/+/" を含むURLのiframe内にレンダリングされる。
-                  # ページ上には他にも「Streamlit Cloud Status」用の別iframeが存在するため、
-                  # 単純に「main_frame以外の最初のframe」を掴むと誤検出する(実際に起きたバグ)。
-                  frame = None
-                  for f in page.frames:
-                      if f != page.main_frame and "/~/+/" in f.url:
-                          frame = f
-                          break
+
+                  if not clicked:
+                      clicked = try_click_wake_button(page)
+
+                  frame = find_app_frame(page)
                   body_text = ""
                   if frame is not None:
                       try:
