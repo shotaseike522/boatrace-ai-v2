@@ -43,10 +43,12 @@ jobs:
                   time.sleep(WAIT_SECONDS)
                   page.reload(timeout=60000)
                   time.sleep(3)
-                  # 実際のアプリ本体はiframe内にレンダリングされる
+                  # 実際のアプリ本体は "/~/+/" を含むURLのiframe内にレンダリングされる。
+                  # ページ上には他にも「Streamlit Cloud Status」用の別iframeが存在するため、
+                  # 単純に「main_frame以外の最初のframe」を掴むと誤検出する(実際に起きたバグ)。
                   frame = None
                   for f in page.frames:
-                      if f != page.main_frame:
+                      if f != page.main_frame and "/~/+/" in f.url:
                           frame = f
                           break
                   body_text = ""
@@ -55,6 +57,8 @@ jobs:
                           body_text = frame.inner_text("body", timeout=5000)
                       except Exception:
                           body_text = ""
+                  frame_urls = [f.url for f in page.frames]
+                  print(f"[試行{attempt}] frame一覧: {frame_urls}")
                   print(f"[試行{attempt}] iframe内テキストの冒頭: {body_text[:80]!r}")
                   if "競艇AI予想" in body_text or "本日のおすすめレース" in body_text:
                       woke_up = True
