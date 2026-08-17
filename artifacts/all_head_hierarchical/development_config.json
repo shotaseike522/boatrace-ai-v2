@@ -1,0 +1,15 @@
+{
+  "experiment": "all_head_hierarchical_v1",
+  "train_period": "2005-01-01..2020-12-31",
+  "calibration_period": "2021-01-01..2021-12-31",
+  "holdout_period": "2022-01-01..2023-06-30",
+  "post_2023H1_used": false,
+  "factorization": "P(first) * P(second|first) * P(third|first,second)",
+  "temperatures": {
+    "first": 0.9,
+    "second": 0.9,
+    "third": 0.9
+  },
+  "probability_sum_required": 1.0,
+  "fallback_used": false
+}

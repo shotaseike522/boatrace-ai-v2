@@ -39,6 +39,14 @@ VENUES_MAP = {
 
 OUTPUTS_DIR = "outputs"
 
+# AI予想モデルの切替トグル。"codex_all_head" = Codex製all_head_hierarchical
+# モデル(2023-07-01〜2026-06-30の比較でTop1/Top5/logloss/Brier/ECEすべて
+# 旧モデルを上回ったため採用)、"scenario_legacy" = 旧シナリオ方式(本命/対抗/
+# 他有力の3枚カード)へロールバックする場合はこちらに戻す。両モデルとも
+# daily_prep.pyで毎日計算されているため、この定数を書き換えて再デプロイ
+# するだけで切り替えられる。
+ACTIVE_AI_MODEL = "codex_all_head"
+
 
 # ====================================================
 # スタイル（白ベース + 青アクセント、スマホ最優先）
@@ -230,6 +238,24 @@ def load_today_predictions() -> tuple[pd.DataFrame | None, str | None]:
     return df, date_label
 
 
+@st.cache_data(ttl=300)
+def load_today_all_head_predictions() -> pd.DataFrame | None:
+    """outputs/all_head_predictions_YYYYMMDD.csv (run_all_head_predictions.pyの出力、
+    Codex製all_head_hierarchicalモデル)のうち最新日付のものを読み込む。"""
+    jst = pytz.timezone("Asia/Tokyo")
+    today_str = datetime.now(jst).strftime("%Y%m%d")
+
+    candidate = os.path.join(OUTPUTS_DIR, f"all_head_predictions_{today_str}.csv")
+    if os.path.exists(candidate):
+        return pd.read_csv(candidate, dtype={"jcd": str})
+
+    pattern = os.path.join(OUTPUTS_DIR, "all_head_predictions_*.csv")
+    files = sorted(glob.glob(pattern))
+    if not files:
+        return None
+    return pd.read_csv(files[-1], dtype={"jcd": str})
+
+
 # ====================================================
 # 画面パーツ
 # ====================================================
@@ -318,6 +344,64 @@ def _render_ticket_card(title: str, subtitle: str, tickets: list[tuple[str, floa
         f'<div class="ai-card-title">{title}</div>'
         f'<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">{subtitle}</div>'
         f"{rows_html}"
+        "</div>"
+    )
+    st.markdown(card_html, unsafe_allow_html=True)
+
+
+AI_BOLD_THRESHOLD = 0.05  # 予測確率5%以上は太字、未満は通常字にする
+
+
+def _render_ai_ticket_rows(tickets: list[tuple[str, float]]) -> str:
+    if not tickets:
+        return '<div style="font-size:13px;color:var(--ink-soft);padding:8px 0;">該当なし</div>'
+    rows_html = []
+    for ticket, prob in tickets:
+        weight = 700 if prob >= AI_BOLD_THRESHOLD else 400
+        rows_html.append(
+            '<div style="display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--line);">'
+            f'<div style="flex:1;font-size:19px;font-weight:{weight};color:var(--ink);">{ticket}</div>'
+            f'<div style="font-size:15px;color:var(--primary);font-weight:{weight};">{prob * 100:.1f}%</div>'
+            "</div>"
+        )
+    return "".join(rows_html)
+
+
+def render_all_head_predictions(row: pd.Series) -> None:
+    """Codex製all_head_hierarchicalモデルによる3連単予測を、
+    「1着可能性が最も高い号艇(本命)のTop5」「2番目に高い号艇(対抗)のTop3」の
+    2グループで表示する。予測確率5%以上は太字、5%未満は通常字にする。
+
+    内部の較正方式(temperature/isotonic/outer残差補正)やlogloss等の指標は
+    サイトには一切表示しない。表示名・補足文は指示書の仕様通り固定する。
+    """
+    favorite_boat = row.get("favorite_boat", "-")
+    challenger_boat = row.get("challenger_boat", "-")
+
+    favorite_tickets: list[tuple[str, float]] = []
+    for k in range(1, 6):
+        ticket = row.get(f"favorite_top{k}_ticket")
+        prob = row.get(f"favorite_top{k}_prob")
+        if ticket is None or pd.isna(ticket) or prob is None or pd.isna(prob):
+            continue
+        favorite_tickets.append((str(ticket), float(prob)))
+
+    challenger_tickets: list[tuple[str, float]] = []
+    for k in range(1, 4):
+        ticket = row.get(f"challenger_top{k}_ticket")
+        prob = row.get(f"challenger_top{k}_prob")
+        if ticket is None or pd.isna(ticket) or prob is None or pd.isna(prob):
+            continue
+        challenger_tickets.append((str(ticket), float(prob)))
+
+    card_html = (
+        '<div class="ai-card">'
+        '<div class="ai-card-title">AI予想確率</div>'
+        '<div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">過去データで実績補正した推定確率です。</div>'
+        f'<div style="font-size:13px;font-weight:700;color:var(--ink);margin-top:6px;">本命（{favorite_boat}号艇）</div>'
+        f"{_render_ai_ticket_rows(favorite_tickets)}"
+        f'<div style="font-size:13px;font-weight:700;color:var(--ink);margin-top:12px;">対抗（{challenger_boat}号艇）</div>'
+        f"{_render_ai_ticket_rows(challenger_tickets)}"
         "</div>"
     )
     st.markdown(card_html, unsafe_allow_html=True)
@@ -555,9 +639,27 @@ def main() -> None:
             st.info("選択したレースのデータが見つかりません。")
         else:
             row = target.iloc[0]
-            render_scenario1(row)
-            render_scenario2(row)
-            render_scenario3(row)
+            if ACTIVE_AI_MODEL == "codex_all_head":
+                all_head_df = load_today_all_head_predictions()
+                if all_head_df is None:
+                    st.warning(
+                        "Codexモデルの予測データが見つかりません。\n\n"
+                        "先に `python run_all_head_predictions.py --input ... --output ...` "
+                        "で予測CSVを作成してください。"
+                    )
+                else:
+                    ah_target = all_head_df[
+                        (all_head_df["jcd"].astype(str) == st.session_state["target_jcd"])
+                        & (all_head_df["r"].astype(int) == st.session_state["target_rno"])
+                    ]
+                    if ah_target.empty:
+                        st.info("選択したレースのAI予想データが見つかりません。")
+                    else:
+                        render_all_head_predictions(ah_target.iloc[0])
+            else:
+                render_scenario1(row)
+                render_scenario2(row)
+                render_scenario3(row)
             render_similar_race_analysis(row)
     else:
         st.info("競艇場とレースを選ぶと、展開シナリオが表示されます。")

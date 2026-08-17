@@ -77,11 +77,15 @@ def fetch_today_race_entries(session):
     os.makedirs(RACES_DIR, exist_ok=True)
     out_file = os.path.join(RACES_DIR, f"races_{hd_str}.csv")
 
-    # 💡 スマートスキップ: 今日分が既に存在する場合は通信処理をスキップ
+    # 💡 スマートスキップ: 今日分が既に取得済み、かつ現行スキーマ(距離列を含む)の
+    # 場合のみ通信処理をスキップする。距離列が無い古いスキーマのファイルが
+    # 残っていた場合は、日付が一致していても再取得する(支部・距離の追加が
+    # 反映されないまま古いファイルが使われ続けるのを防ぐため)。
     if os.path.exists(out_file):
         try:
             df_check = pd.read_csv(out_file, dtype={"jcd": str})
-            if "date" in df_check.columns and str(df_check['date'].iloc[0]) == hd_str:
+            is_current_schema = "距離" in df_check.columns
+            if "date" in df_check.columns and str(df_check['date'].iloc[0]) == hd_str and is_current_schema:
                 print(f"✅ 本日 ({hd_str}) の出走表は取得済みのため、通信処理をスキップします。")
                 tobans = []
                 for w in range(1, 7):
@@ -108,12 +112,13 @@ def fetch_today_race_entries(session):
         boats = race["boats"]
         if len(boats) != 6:
             continue
-        row = {"date": hd_str, "jcd": race["jcd"], "r": race["r"]}
+        row = {"date": hd_str, "jcd": race["jcd"], "r": race["r"], "距離": race.get("距離")}
         for w in range(1, 7):
             b = boats[w - 1]
             toban = b["登番"]
             row[f"登番{w}"] = toban
             row[f"級別{w}"] = b["級別"]
+            row[f"支部{w}"] = b["支部"]
             row[f"年齢{w}"] = safe_float(b["年齢"])
             row[f"体重{w}"] = safe_float(b["体重"])
             # 💡 生の全国勝率(0〜10程度)をそのまま使う。平均差し引きはしない。
@@ -181,6 +186,55 @@ def run_site_predictions(races_csv):
         return None
     except FileNotFoundError:
         print("⚠️ run_scenario_predictions.py が見つかりません。リポジトリ直下で実行してください。")
+        return None
+
+
+def run_all_head_predictions(races_csv):
+    """run_all_head_predictions.py をサブプロセスとして実行し、Codex製
+    all_head_hierarchicalモデル(Codex_all_head_hierarchical_outer_corrected)による
+    Top1〜Top20確率付き予測CSVを生成する。
+
+    旧来のシナリオ予測(run_site_predictions)とは完全に独立した経路であり、
+    こちらを追加してもrun_site_predictions()の出力・挙動には一切影響しない
+    (両方が毎日計算される、いわゆるshadow運用)。表示切替はapp.py側の
+    ACTIVE_AI_MODEL定数で行う。
+    """
+    if races_csv is None:
+        print("⚠️ 出走表が無いため、Codexモデル予測処理をスキップします。")
+        return None
+
+    jst = pytz.timezone('Asia/Tokyo')
+    hd_str = datetime.now(jst).strftime("%Y%m%d")
+    os.makedirs(OUTPUTS_DIR, exist_ok=True)
+    output_csv = os.path.join(OUTPUTS_DIR, f"all_head_predictions_{hd_str}.csv")
+
+    if os.path.exists(output_csv):
+        print(f"✅ 本日 ({hd_str}) のCodexモデル予測は既に作成済みのためスキップします: {output_csv}")
+        return output_csv
+
+    print(f"\n--- [2b] Codexモデル予測の実行 ({hd_str}) を開始 ---")
+    cmd = [
+        sys.executable,
+        "run_all_head_predictions.py",
+        "--input", races_csv,
+        "--output", output_csv,
+    ]
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+        print(f"✅ Codexモデル予測が完了しました: {output_csv}")
+        return output_csv
+    except subprocess.CalledProcessError as exc:
+        # artifactの読み込み失敗や実行時検証エラーはここで例外として拾われる。
+        # fallbackはせず、シナリオ予測(旧モデル)には影響させずに警告のみ表示して続行する。
+        print(f"⚠️ run_all_head_predictions.py の実行に失敗しました: {exc}")
+        print(exc.stdout)
+        print(exc.stderr)
+        return None
+    except FileNotFoundError:
+        print("⚠️ run_all_head_predictions.py が見つかりません。リポジトリ直下で実行してください。")
         return None
 
 
@@ -413,8 +467,8 @@ if __name__ == "__main__":
     rolling_archive.append_entries_to_archive(races_csv_path)
     rolling_archive.trim_archive()
 
-    # TODO(Phase5): run_site_predictions()をrun_scenario_predictions.pyの呼び出しに置き換える
     run_site_predictions(races_csv_path)
+    run_all_head_predictions(races_csv_path)
     update_racer_master(main_session, today_racer_tobans)
     enrich_races_with_racer_master(races_csv_path)
     run_pattern_alert()

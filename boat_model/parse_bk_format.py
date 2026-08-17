@@ -18,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 FULLWIDTH_DIGITS = str.maketrans("０１２３４５６７８９", "0123456789")
+FULLWIDTH_ALNUM = str.maketrans("０１２３４５６７８９Ｈｍ", "0123456789Hm")
 
 # 7z実行ファイルの候補(Windowsローカル環境 / GitHub Actions Ubuntuランナーの両対応)。
 # UbuntuランナーではワークフローでAPTから `p7zip-full` をインストールし、
@@ -85,8 +86,12 @@ def parse_b_venue_block(jcd: str, block: bytes) -> list[dict]:
         line = lines[i]
         # ヘッダー行(「艇 選手 選手」を含む)の次の区切り線の後に6艇分のデータがある
         if b"\x92\xf8" in line and b"\x91I\x8e\xe8" in line:  # 艇, 選手 (cp932)
-            # レース番号を直近数行以内の "○Ｒ" 表記から探す
+            # レース番号と距離を直近数行以内の "○Ｒ … Ｈ1800ｍ" 表記から探す。
+            # レース距離は天候と違い、当日朝の番組表(B形式)heading行に
+            # 既に確定値として記載されている(全角"Ｈ1800ｍ"表記)ため、
+            # 天候・風速等とは異なり購入前に取得可能。
             race_no = None
+            distance = None
             for back in range(1, 6):
                 if i - back < 0:
                     break
@@ -94,6 +99,9 @@ def parse_b_venue_block(jcd: str, block: bytes) -> list[dict]:
                 m = re.search(r"([０-９0-9]{1,2})\s*[ＲR]", text)
                 if m:
                     race_no = int(m.group(1).translate(FULLWIDTH_DIGITS))
+                    dm = re.search(r"H\s*(\d{3,4})\s*m", text.translate(FULLWIDTH_ALNUM))
+                    if dm:
+                        distance = int(dm.group(1))
                     break
             # ヘッダー2行目 + 区切り線をスキップして選手行へ
             j = i + 3
@@ -102,7 +110,7 @@ def parse_b_venue_block(jcd: str, block: bytes) -> list[dict]:
                 boats.append(_parse_b_racer_line(lines[j][:79]))
                 j += 1
             if race_no is not None and boats:
-                rows.append({"jcd": jcd, "r": race_no, "boats": boats})
+                rows.append({"jcd": jcd, "r": race_no, "boats": boats, "距離": distance})
             i = j
         else:
             i += 1

@@ -1,0 +1,15 @@
+{
+  "experiment": "position_boatwise_isotonic_v1",
+  "base_model_train_period": "2005-01-01..2020-12-31",
+  "calibrator_fit_period": "2021-01-01..2021-12-31",
+  "holdout_evaluation_period": "2022-01-01..2023-06-30",
+  "method": "classwise isotonic by candidate boat followed by within-race normalization",
+  "recommended_for_next_unseen_period": {
+    "first": "boatwise_isotonic_2021",
+    "second": "boatwise_isotonic_2021",
+    "third": "temperature_only"
+  },
+  "third_note": "Boatwise calibration improved ECE/Brier/Top1 but slightly worsened holdout conditional logloss.",
+  "probability_sum_required": 1.0,
+  "fallback_used": false
+}
