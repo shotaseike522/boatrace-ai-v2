@@ -144,6 +144,62 @@ def fetch_today_race_entries(session):
     return out_file, sorted(unique_tobans)
 
 
+def fetch_race_close_times(session):
+    """本日の各レースの締切予定時刻を取得し、data/close_times_YYYYMMDD.csvに保存する。
+    B形式(番組表)には締切時刻が含まれないため、boatrace.jpのraceindexページ
+    (「締切予定時刻/投票」列)を別途スクレイピングする。「本日のおすすめレース」
+    カードへの締切時刻表示のためだけに使う付加情報であり、失敗しても他の
+    処理には影響しない(呼び出し側で例外を握りつぶす想定)。
+    """
+    jst = pytz.timezone('Asia/Tokyo')
+    hd_str = datetime.now(jst).strftime("%Y%m%d")
+    out_file = os.path.join(RACES_DIR, f"close_times_{hd_str}.csv")
+    if os.path.exists(out_file):
+        print(f"✅ 本日 ({hd_str}) の締切時刻は取得済みのためスキップします。")
+        return out_file
+
+    print(f"\n--- [1b] 締切予定時刻取得 ({hd_str}) を開始 ---")
+    rows = []
+    for jcd in venues_map:
+        try:
+            resp = session.get(
+                "https://www.boatrace.jp/owpc/pc/race/raceindex",
+                params={"jcd": jcd, "hd": hd_str}, timeout=15,
+            )
+            resp.raise_for_status()
+            resp.encoding = "utf-8"
+        except Exception:
+            continue
+        soup = BeautifulSoup(resp.text, "html.parser")
+        table = soup.find("table")
+        if table is None:
+            continue
+        for tr in table.find_all("tr"):
+            tds = tr.find_all("td")
+            if not tds:
+                continue
+            txt = tds[0].get_text(strip=True)
+            if not txt.endswith("R"):
+                continue
+            try:
+                r = int(txt[:-1])
+            except ValueError:
+                continue
+            if len(tds) < 2:
+                continue
+            time_txt = tds[1].get_text(strip=True)
+            if ":" not in time_txt:
+                continue
+            rows.append({"jcd": jcd, "r": r, "close_time": time_txt})
+
+    if not rows:
+        print("⚠️ 締切予定時刻が1件も取得できませんでした。")
+        return None
+    pd.DataFrame(rows).to_csv(out_file, index=False, encoding="utf-8-sig")
+    print(f"💾 締切予定時刻を保存しました: {out_file} ({len(rows)}レース)")
+    return out_file
+
+
 def run_site_predictions(races_csv):
     """run_scenario_predictions.py をサブプロセスとして実行し、シナリオ予測CSVを生成する。
 
@@ -466,6 +522,11 @@ if __name__ == "__main__":
     races_csv_path, today_racer_tobans = fetch_today_race_entries(main_session)
     rolling_archive.append_entries_to_archive(races_csv_path)
     rolling_archive.trim_archive()
+
+    try:
+        fetch_race_close_times(main_session)
+    except Exception as exc:
+        print(f"⚠️ 締切予定時刻の取得に失敗しました（他の処理には影響しません）: {exc}")
 
     run_site_predictions(races_csv_path)
     run_all_head_predictions(races_csv_path)

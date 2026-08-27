@@ -38,6 +38,7 @@ VENUES_MAP = {
 }
 
 OUTPUTS_DIR = "outputs"
+RACES_DIR = "data"
 
 # AI予想モデルの切替トグル。"codex_all_head" = Codex製all_head_hierarchical
 # モデル(2023-07-01〜2026-06-30の比較でTop1/Top5/logloss/Brier/ECEすべて
@@ -236,6 +237,19 @@ def load_today_predictions() -> tuple[pd.DataFrame | None, str | None]:
     df = pd.read_csv(latest, dtype={"jcd": str})
     date_label = os.path.basename(latest).replace("scenario_predictions_", "").replace(".csv", "")
     return df, date_label
+
+
+@st.cache_data(ttl=300)
+def load_race_close_times(date_label: str | None) -> pd.DataFrame | None:
+    """data/close_times_YYYYMMDD.csv(daily_prep.pyのfetch_race_close_times()が
+    生成する、レースごとの締切予定時刻)を読み込む。無ければNoneを返し、
+    呼び出し側は締切時刻表示を単純にスキップする(必須情報ではないため)。"""
+    if not date_label:
+        return None
+    candidate = os.path.join(RACES_DIR, f"close_times_{date_label}.csv")
+    if not os.path.exists(candidate):
+        return None
+    return pd.read_csv(candidate, dtype={"jcd": str})
 
 
 @st.cache_data(ttl=300)
@@ -543,11 +557,13 @@ def render_similar_race_analysis(row: pd.Series) -> None:
 # ====================================================
 # メイン
 # ====================================================
-def render_pickup_races(df: pd.DataFrame) -> None:
+def render_pickup_races(df: pd.DataFrame, close_times: pd.DataFrame | None = None) -> None:
     """アラインドペア2連複(本命・対抗の2着候補が同じ艇の組になり、かつ
     combined_probが閾値51%以上)のレースを確率順にピックアップする。
     該当件数は日によって変動する(固定件数ではない)。
     タップすると下の競艇場・レースボタンが連動して選択され、予想内容が表示される。
+    close_timesが渡された場合、カードに締切予定時刻を追加表示する
+    (取得できていない日は従来通り締切時刻なしで表示するだけで、他の表示には影響しない)。
     """
     if "aligned_pair_flag" not in df.columns:
         return
@@ -559,6 +575,8 @@ def render_pickup_races(df: pd.DataFrame) -> None:
         .sort_values("aligned_pair_prob", ascending=False)
         .reset_index(drop=True)
     )
+    if close_times is not None and not close_times.empty:
+        pickup = pickup.merge(close_times[["jcd", "r", "close_time"]], on=["jcd", "r"], how="left")
     if pickup.empty:
         st.markdown(
             '<div class="ai-card-title">本日のおすすめレース</div>'
@@ -584,7 +602,9 @@ def render_pickup_races(df: pd.DataFrame) -> None:
                 and st.session_state["target_rno"] == rno
             )
             with cols[i]:
-                label = f"{venue_name} {rno}R\n{pair} {prob_pct:.0f}%"
+                close_time = item.get("close_time") if "close_time" in item else None
+                time_line = f"\n締切 {close_time}" if pd.notna(close_time) else ""
+                label = f"{venue_name} {rno}R\n{pair} {prob_pct:.0f}%{time_line}"
                 btn_type = "primary" if is_active else "secondary"
                 if st.button(label, key=f"pickup_{jcd}_{rno}", use_container_width=True, type=btn_type):
                     st.session_state["target_jcd"] = jcd
@@ -618,8 +638,10 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    close_times = load_race_close_times(date_label)
+
     with st.container(border=True, key="ai-card-pickup"):
-        render_pickup_races(df)
+        render_pickup_races(df, close_times)
 
     with st.container(border=True, key="ai-card-venue"):
         render_venue_picker(df)
