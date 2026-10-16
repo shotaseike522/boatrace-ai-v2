@@ -195,6 +195,14 @@ def inject_style() -> None:
             white-space: pre-line;
             line-height: 1.3;
         }
+        /* 新しいStreamlitはボタン内の文字を内側の要素で nowrap+省略表示(…)にするため、
+           改行(\n)が潰れて切れる。内側の要素にも改行表示を指定して元の複数行表示に戻す。 */
+        div[data-testid="stButton"] button div,
+        div[data-testid="stButton"] button p {
+            white-space: pre-line !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }
         div[data-testid="stButton"] button:hover {
             border-color: var(--primary);
             color: var(--primary);
